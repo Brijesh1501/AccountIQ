@@ -1,7 +1,8 @@
-// AccountIQ — Supabase Edge Function (Groq — FREE, worldwide)
+// AccountIQ — Supabase Edge Function (Groq + Web Search + LinkedIn scrape)
 // File: supabase/functions/enrich/index.ts
 // Deploy:  supabase functions deploy enrich --no-verify-jwt
-// Secret:  supabase secrets set GROQ_API_KEY=gsk_...
+// Secrets: supabase secrets set GROQ_API_KEY=gsk_...
+//          supabase secrets set SERPER_API_KEY=...  (free at serper.dev - 2500/month free)
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -27,65 +28,167 @@ function checkRateLimit(userId: string): { allowed: boolean; remaining: number }
   return { allowed: true, remaining: RATE_LIMIT - entry.count };
 }
 
-const SYSTEM_PROMPT = `You are an expert B2B account research analyst for a CRM platform. Given a company website, return a comprehensive JSON profile using your full training knowledge. Be confident — make reasonable inferences rather than saying Unknown.
+// ── Step 1: Search for LinkedIn URL via Serper ──────────────
+async function findLinkedInUrl(companyName: string, website: string, serperKey: string): Promise<string> {
+  try {
+    const query = `${companyName} site:linkedin.com/company`;
+    const res = await fetch("https://google.serper.dev/search", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-API-KEY": serperKey },
+      body: JSON.stringify({ q: query, num: 5 }),
+    });
+    if (!res.ok) return "";
+    const data = await res.json();
+    // Find first linkedin.com/company result
+    for (const item of data?.organic || []) {
+      const link: string = item.link || "";
+      if (link.includes("linkedin.com/company/")) {
+        // Clean URL — remove trailing slashes and query params
+        const match = link.match(/(https:\/\/[a-z]+\.linkedin\.com\/company\/[a-zA-Z0-9_-]+)/);
+        if (match) return match[1];
+      }
+    }
+    // Also check knowledge graph
+    const kg = data?.knowledgeGraph;
+    if (kg?.website) {
+      const kgLink = kg.website;
+      if (kgLink.includes("linkedin.com/company/")) return kgLink;
+    }
+    return "";
+  } catch (e) {
+    console.error("Serper search error:", e);
+    return "";
+  }
+}
+
+// ── Step 2: Scrape LinkedIn public page ─────────────────────
+interface LinkedInData {
+  employeeCount: string;
+  employeeRange: string;
+  hqLocation: string;
+  founded: string;
+  industry: string;
+  companyType: string;
+  website: string;
+  about: string;
+}
+
+async function scrapeLinkedIn(linkedinUrl: string): Promise<LinkedInData> {
+  const empty: LinkedInData = { employeeCount: "", employeeRange: "", hqLocation: "", founded: "", industry: "", companyType: "", website: "", about: "" };
+  try {
+    // LinkedIn blocks most scrapers — use a User-Agent that mimics a real browser
+    const res = await fetch(linkedinUrl, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Cache-Control": "no-cache",
+      },
+    });
+
+    if (!res.ok) {
+      console.log("LinkedIn fetch status:", res.status);
+      return empty;
+    }
+
+    const html = await res.text();
+
+    // Extract employee count — LinkedIn shows "1,001-5,000 employees" or "501-1,000 employees"
+    const empRangeMatch = html.match(/(\d[\d,]*[-–]\d[\d,]*)\s*employees/i) ||
+                          html.match(/"staffCount"\s*:\s*(\d+)/i) ||
+                          html.match(/(\d[\d,]+)\s*employees/i);
+    const employeeRange = empRangeMatch ? empRangeMatch[1].replace(/,/g, "") : "";
+
+    // Extract staff count from JSON-LD or meta
+    const staffMatch = html.match(/"numberOfEmployees"[^}]*"value"\s*:\s*(\d+)/) ||
+                       html.match(/"staffCount"\s*:\s*(\d+)/);
+    const employeeCount = staffMatch ? staffMatch[1] : "";
+
+    // Extract HQ location
+    const hqMatch = html.match(/"addressLocality"\s*:\s*"([^"]+)"/) ||
+                    html.match(/headquartered in ([^<\n,]+)/i) ||
+                    html.match(/"addressCountry"\s*:\s*"([^"]+)"/);
+    const hqLocation = hqMatch ? hqMatch[1].trim() : "";
+
+    // Extract founded year
+    const foundedMatch = html.match(/[Ff]ounded\s*[:\s]*(\d{4})/) ||
+                         html.match(/"foundingDate"\s*:\s*"(\d{4})"/);
+    const founded = foundedMatch ? foundedMatch[1] : "";
+
+    // Extract about/description
+    const aboutMatch = html.match(/<meta\s+name="description"\s+content="([^"]{50,500})"/i) ||
+                       html.match(/class="[^"]*description[^"]*"[^>]*>([^<]{50,400})</i);
+    const about = aboutMatch ? aboutMatch[1].trim() : "";
+
+    // Extract company type
+    const typeMatch = html.match(/[Cc]ompany [Tt]ype[^:]*:\s*([^\n<]+)/);
+    const companyType = typeMatch ? typeMatch[1].trim() : "";
+
+    return { employeeCount, employeeRange, hqLocation, founded, industry: "", companyType, website: "", about };
+  } catch (e) {
+    console.error("LinkedIn scrape error:", e);
+    return empty;
+  }
+}
+
+// ── Step 3: Search for extra company info ───────────────────
+async function searchCompanyInfo(companyName: string, website: string, serperKey: string): Promise<string> {
+  try {
+    const query = `${companyName} ${website} company headquarters employees revenue`;
+    const res = await fetch("https://google.serper.dev/search", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-API-KEY": serperKey },
+      body: JSON.stringify({ q: query, num: 5 }),
+    });
+    if (!res.ok) return "";
+    const data = await res.json();
+    const snippets: string[] = [];
+    // Knowledge graph
+    const kg = data?.knowledgeGraph;
+    if (kg?.description) snippets.push("About: " + kg.description);
+    if (kg?.attributes) {
+      for (const [k, v] of Object.entries(kg.attributes)) {
+        snippets.push(`${k}: ${v}`);
+      }
+    }
+    // Organic snippets
+    for (const item of (data?.organic || []).slice(0, 4)) {
+      if (item.snippet) snippets.push(item.snippet);
+    }
+    // Answer box
+    if (data?.answerBox?.answer) snippets.push(data.answerBox.answer);
+    if (data?.answerBox?.snippet) snippets.push(data.answerBox.snippet);
+    return snippets.join("\n").slice(0, 2000);
+  } catch (e) {
+    console.error("Company search error:", e);
+    return "";
+  }
+}
+
+const SYSTEM_PROMPT = `You are an expert B2B account research analyst. Given a company website and research data, return a comprehensive JSON profile. Use the provided real data (LinkedIn, web search) — only fall back to inference when data is missing.
 
 ════════════════════════════════════════════
-ACCOUNT TYPE — Use exactly ONE of these five
+ACCOUNT TYPE — Use exactly ONE
 ════════════════════════════════════════════
-
-ENTERPRISE:
-- Organisation with 1000+ employees, OR smaller org (~45+ employees) with multiple business lines/sub-businesses
-- Can be tech or non-tech depending on scale of technology usage
-- Operates across multiple domains, sub-businesses, or business lines
-- ROI/profitability mainly from OFFLINE channels: physical stores, distributors, direct sales — NOT online platforms
-- Organisations that sell ONLY their own products via website/app = ENTERPRISE (not Consumer Portal)
-- Examples: tejasnetworks.com (telecom hardware), wforwoman.com (fashion retail), wildcraft.com (outdoor gear)
-- Key test: Is the website primarily a product catalogue / brand site for their own products? → Enterprise
-
-ISV (Independent Software Vendor):
-- Owns and develops its OWN software product or platform
-- Provides software solutions to businesses or individual users
-- Revenue through subscriptions, licensing, or trial-to-paid models
-- MUST be independent — not acquired by another organisation
-- Core business = software product sales, NOT services
-- Examples: Freshworks (CRM software), Zoho (business apps), Postman (API platform)
-- Key test: Do they primarily SELL software they BUILT? → ISV
-
-CONSUMER PORTAL:
-- ROI primarily dependent on online platforms
-- Operates as a MARKETPLACE connecting buyers and sellers
-- Revenue from online transactions, commissions, advertisements, or platform usage
-- If an organisation ONLY sells its own products through website/app → ENTERPRISE, NOT Consumer Portal
-- Examples: Amazon (marketplace), OLX (classifieds), MakeMyTrip (travel marketplace)
-- Key test: Do they connect third-party buyers and sellers? → Consumer Portal
-- TripJack = Consumer Portal (OTA marketplace connecting travellers with airlines/hotels)
-
-AGENCY / SERVICE COMPANY:
-- Primarily provides IT SERVICES: IT consulting, application development, website development, digital transformation
-- Does NOT own a proprietary software product as primary offering
-- Any NON-IT service organisation → ENTERPRISE, not Agency/Service Company
-- Examples: Wipro, Infosys (IT services), ThoughtWorks (consulting)
-
-PE / VC FIRMS:
-- Invests capital in businesses — does NOT sell products or services
-- PE: invests in mature/established companies, acquires controlling/significant stakes, long-term value creation
-- VC: invests in early-stage/growth startups, minority stakes, focuses on innovation and rapid growth
-- Examples: Sequoia Capital, SoftBank Vision Fund, Accel
+ENTERPRISE: 1000+ employees OR smaller org (~45+) with multiple business lines. ROI mainly from OFFLINE channels (stores, distributors, direct sales). Sells own products via website = Enterprise (not Consumer Portal). Examples: tejasnetworks.com, wforwoman.com, wildcraft.com
+ISV: Owns its own software product/platform. Revenue via subscriptions/licensing. INDEPENDENT (not acquired). Core = software product NOT services. Examples: Freshworks, Zoho, Postman
+CONSUMER PORTAL: Marketplace connecting buyers and sellers. Revenue from transactions/commissions/ads. If only sells own products → Enterprise. Examples: Amazon, MakeMyTrip, TripJack (OTA marketplace)
+AGENCY/SERVICE COMPANY: Provides IT SERVICES only (consulting, app dev, web dev). No proprietary software. Non-IT service → Enterprise.
+PE/VC FIRMS: Invests capital only. No products/services.
 
 ════════════════════════════════════════════
 BUSINESS TYPE
 ════════════════════════════════════════════
-B2B: Sells to other businesses. Large deal sizes, longer sales cycles, relationship-driven. Examples: Salesforce, SAP, AWS
-B2C: Sells directly to individual consumers. High volume, marketing-driven. Examples: Amazon, Netflix, Uber
-B2B and B2C: Serves both segments. Examples: Microsoft (Office 365 + Xbox), Google (Workspace + Search)
+B2B | B2C | B2B and B2C
 
 ════════════════════════════════════════════
-ACCOUNT SIZE — by employee count
+ACCOUNT SIZE
 ════════════════════════════════════════════
 StartUp (<50) | Small (50-200) | Medium (200-500) | Large (500-1000) | X-Large (1000-5000) | XX-Large (5000+)
+Use LinkedIn employee count if provided — it is the most accurate signal.
 
 ════════════════════════════════════════════
-INDUSTRIES & SUB-INDUSTRIES — use exact names
+INDUSTRIES & SUB-INDUSTRIES
 ════════════════════════════════════════════
 Media & Entertainment → Broadcasters | Studios & Content Owners | OTT Platforms | Content Syndicators & Distributors | Publishing | General Entertainment Content | News | Gaming | Radio & Music | Cookery Media
 Financial Services → Retail & Commercial Banking | Investment Management | Insurance | Wealth Management | Payments | NBFC / Lending | Accounting | Others (Fintech & Capital Markets)
@@ -97,16 +200,9 @@ Wagering → Gambling Facilities & Casinos | Operators | iGaming | Lotteries | P
 Retail → E-Commerce
 Agriculture Resources & Utilities → Oil & Energy | Mining | Power & Utilities | Agriculture & AgriTech
 Business Services → IT Services & Consulting | BPM / BPO Companies | Marketing & Advertising | Tax Audit & Legal Services | Translation & Localization
-Government & Public Sector → Government & Public Sector
-Telecom → Telecom
-Industrial & Manufacturing → Industrial & Manufacturing
-Automobile → Automobile
-Food & Beverage → Food & Beverage
-FMCG & CPG → FMCG & CPG
-Real Estate → Real Estate
-PE / VC Firms → PE / VC Firms
-Animation & Gaming → Animation & Gaming
-Internet (Digital Platforms) → Internet (Digital Platforms)
+Government & Public Sector → Government & Public Sector | Telecom → Telecom | Industrial & Manufacturing → Industrial & Manufacturing
+Automobile → Automobile | Food & Beverage → Food & Beverage | FMCG & CPG → FMCG & CPG | Real Estate → Real Estate
+PE / VC Firms → PE / VC Firms | Animation & Gaming → Animation & Gaming | Internet (Digital Platforms) → Internet (Digital Platforms)
 
 ════════════════════════════════════════════
 REGIONS
@@ -114,96 +210,48 @@ REGIONS
 North America | EMEA | APAC | LATAM | India
 
 ════════════════════════════════════════════
-CLOUD PLATFORM CLASSIFICATION
+CLOUD PLATFORM
 ════════════════════════════════════════════
-- Single cloud: AWS | Azure | GCP | Oracle Cloud | IBM Cloud | Alibaba Cloud | DigitalOcean | Cloudflare | Vercel | Netlify | Heroku | On-premise
-- Multi-cloud: use exact pattern → Multi-cloud (AWS, GCP) or Multi-cloud (AWS, Azure, GCP)
-- Infer from: company type, region, tech stack, known partnerships
-  - Indian startups/scaleups → usually AWS or GCP
-  - Travel portals → usually AWS
-  - Microsoft-stack companies → Azure
-  - Chinese companies → Alibaba Cloud
-  - Enterprise on-premise → On-premise
-- Only use Unknown if absolutely no signal exists
+Single: AWS | Azure | GCP | Oracle Cloud | IBM Cloud | Alibaba Cloud | DigitalOcean | Cloudflare | Vercel | Netlify | Heroku | On-premise
+Multi-cloud: Multi-cloud (AWS, GCP) pattern — list specific platforms
+Infer: Indian startups → AWS/GCP | Travel portals → AWS | Microsoft-stack → Azure
 
 ════════════════════════════════════════════
-RESEARCH & INFERENCE RULES — CRITICAL
+INFERENCE RULES (when real data is missing)
 ════════════════════════════════════════════
-Use ALL your training knowledge. Never say Unknown when reasonable inference is possible.
-
-LOCATION:
-- Infer country from domain TLD: .in=India, .uk=UK, .au=Australia, .de=Germany, .sg=Singapore, .ae=UAE
-- For Indian companies: default to India, use known cities (Bangalore, Mumbai, Gurugram, Hyderabad, Pune, Chennai, Delhi)
-- For travel/fintech/edtech Indian startups: likely Bangalore or Gurugram
-- State from city: Bangalore=Karnataka, Mumbai=Maharashtra, Gurugram=Haryana, Hyderabad=Telangana, Pune=Maharashtra, Chennai=Tamil Nadu, Delhi=Delhi
-
-TIMEZONE:
-- India → IST / UTC+5:30
-- UK/Ireland → GMT / UTC+0
-- Germany/France/Netherlands → CET / UTC+1
-- UAE → GST / UTC+4
-- Singapore → SGT / UTC+8
-- Australia Sydney → AEST / UTC+10
-- US West Coast → PST / UTC-8
-- US East Coast → EST / UTC-5
-
-LINKEDIN URL:
-- Always construct: https://www.linkedin.com/company/[slug]
-- Slug = company name lowercased, spaces replaced with hyphens
-- TripJack → https://www.linkedin.com/company/tripjack
-- MakeMyTrip → https://www.linkedin.com/company/makemytrip
-- Freshworks → https://www.linkedin.com/company/freshworks
-
-EMPLOYEE COUNT — estimate from signals:
-- Well-funded startup (Series A/B) → 50-500
-- Travel OTA in India (TripJack, Yatra) → 200-1000
-- Large Indian IT firm → 10000+
-- SaaS startup → 50-500
-- Listed company with revenue >$100M → 1000+
-
-REVENUE — estimate from stage:
-- Early startup → 1-10 USD M
-- Series B/C funded → 10-100 USD M
-- Mid-market → 50-500 USD M
-- Large enterprise → 500+ USD M
-- Indian travel OTA → 10-100 USD M
-
-ENGINEERING & IT — infer from company type:
-- Travel portals → React/Angular, Node.js/Python, Java microservices, REST APIs, mobile apps (iOS/Android)
-- Fintech → Java/Python/Go, Spring Boot, microservices, PostgreSQL/MySQL
-- SaaS → React, Node.js/Python/Ruby, PostgreSQL, Redis, REST/GraphQL
-- E-commerce → React/Next.js, Node.js, Python, MySQL/MongoDB
-- IT Services → Java, .NET, Python, varied per project
-
-DEVOPS — infer from company type and size:
-- Modern startup → GitHub Actions, Docker, Kubernetes, CI/CD pipelines
-- Mid-size → Jenkins or GitHub Actions, Docker, Kubernetes, Terraform
-- Enterprise → Jenkins, Ansible, Terraform, Kubernetes, on-premise or hybrid
+- Location: .in domain = India. Infer city from company type (travel/fintech → Gurugram or Bangalore)
+- State from city: Bangalore=Karnataka, Mumbai=Maharashtra, Gurugram=Haryana, Hyderabad=Telangana
+- Timezone: India=IST/UTC+5:30, UK=GMT/UTC+0, UAE=GST/UTC+4, Singapore=SGT/UTC+8, US West=PST/UTC-8, US East=EST/UTC-5
+- LinkedIn URL: construct as https://www.linkedin.com/company/[company-name-slug] if not provided
+- Engineering: travel portals=React/Node.js/Python/Java | fintech=Java/Python/Go | SaaS=React/Node.js
+- DevOps: modern startup=GitHub Actions+Docker+Kubernetes | enterprise=Jenkins+Terraform+Kubernetes
+- Revenue: use web search data if available, else estimate from company stage
 
 ════════════════════════════════════════════
-OUTPUT — return ONLY this JSON, all 20 keys required
+OUTPUT — all 20 keys required
 ════════════════════════════════════════════
+Return ONLY valid JSON:
 {
   "accountName": "Official company name",
   "website": "domain as provided",
-  "draInsights": "2-3 sentences: what the company does, business model, key products/services, market position and target customers",
-  "engineeringIT": "Tech stack: languages, frameworks, databases, APIs. Infer from company type if not known directly.",
-  "cloudPlatform": "Cloud/hosting platform. Single name OR Multi-cloud (X, Y) pattern. Infer from region and company type.",
-  "devOps": "DevOps tools and CI/CD practices. Infer from company size and type.",
-  "employeeCount": "Estimated number or range e.g. 500 or 200-500. Use signals from funding, revenue, market presence.",
-  "accountTypeBySize": "Exactly one of: StartUp (<50) | Small (50-200) | Medium (200-500) | Large (500-1000) | X-Large (1000-5000) | XX-Large (5000+)",
-  "accountType": "Exactly one of: Enterprise | ISV | Consumer Portal | Agency/Service Company | PE/VC Firms",
-  "accountTypeReason": "1-2 sentences explaining WHY this account type. Cite specific evidence: product/platform name for ISV, marketplace nature for Consumer Portal, offline revenue channels for Enterprise, IT services for Agency, portfolio investing for PE/VC.",
-  "accountLinkedIn": "Full URL: https://www.linkedin.com/company/[slug]. Always construct this — do not leave empty.",
-  "businessType": "Exactly one of: B2B | B2C | B2B and B2C",
-  "industry": "Exactly one industry from the taxonomy above",
+  "draInsights": "2-3 sentences: what company does, business model, key products/services, market position",
+  "engineeringIT": "Tech stack from research or inference",
+  "cloudPlatform": "Cloud platform — single name or Multi-cloud (X, Y) pattern",
+  "devOps": "DevOps tools and CI/CD practices",
+  "employeeCount": "Use LinkedIn employee count/range if available, else estimate",
+  "accountTypeBySize": "One of: StartUp (<50) | Small (50-200) | Medium (200-500) | Large (500-1000) | X-Large (1000-5000) | XX-Large (5000+)",
+  "accountType": "One of: Enterprise | ISV | Consumer Portal | Agency/Service Company | PE/VC Firms",
+  "accountTypeReason": "1-2 sentences explaining WHY with specific evidence",
+  "accountLinkedIn": "Real LinkedIn URL from search if found, else constructed URL",
+  "businessType": "One of: B2B | B2C | B2B and B2C",
+  "industry": "Exactly one industry from taxonomy",
   "subIndustry": "Exactly one matching sub-industry",
-  "revenueUSD": "Estimated annual revenue in USD millions e.g. 50 or 10-50. Use company stage signals.",
-  "billingCity": "HQ city. Infer from domain, company context, or known HQ location.",
-  "billingState": "HQ state/province. Derive from city.",
-  "billingCountry": "HQ country. Infer from TLD, name, or context — almost always determinable.",
-  "region": "Exactly one of: North America | EMEA | APAC | LATAM | India",
-  "timeZone": "HQ timezone derived from country/city e.g. IST / UTC+5:30"
+  "revenueUSD": "From web search if available, else estimate in USD millions",
+  "billingCity": "From LinkedIn/search if found, else infer",
+  "billingState": "Derived from city",
+  "billingCountry": "From LinkedIn/search or infer from domain TLD",
+  "region": "One of: North America | EMEA | APAC | LATAM | India",
+  "timeZone": "Derived from country/city e.g. IST / UTC+5:30"
 }`;
 
 serve(async (req: Request) => {
@@ -251,13 +299,73 @@ serve(async (req: Request) => {
       });
     }
 
-    // ── 4. Call Groq ────────────────────────────────────────
     const groqKey = Deno.env.get("GROQ_API_KEY");
+    const serperKey = Deno.env.get("SERPER_API_KEY");
+
     if (!groqKey) {
       return new Response(JSON.stringify({ error: "API key not configured. Contact your admin." }), {
         status: 500, headers: { ...CORS, "Content-Type": "application/json" },
       });
     }
+
+    // ── 4. Extract company name from website ────────────────
+    const companyName = website
+      .replace(/^https?:\/\//, "")
+      .replace(/^www\./, "")
+      .split(".")[0]
+      .replace(/-/g, " ")
+      .trim();
+
+    // ── 5. Parallel: Search LinkedIn URL + Company Info ─────
+    let linkedInUrl = "";
+    let linkedInData: LinkedInData = { employeeCount: "", employeeRange: "", hqLocation: "", founded: "", industry: "", companyType: "", website: "", about: "" };
+    let webSearchContext = "";
+
+    if (serperKey) {
+      console.log("Running web search for:", website);
+      const [liUrl, webCtx] = await Promise.all([
+        findLinkedInUrl(companyName, website, serperKey),
+        searchCompanyInfo(companyName, website, serperKey),
+      ]);
+      linkedInUrl = liUrl;
+      webSearchContext = webCtx;
+      console.log("LinkedIn URL found:", linkedInUrl);
+      console.log("Web context length:", webSearchContext.length);
+
+      // ── 6. Scrape LinkedIn if URL found ───────────────────
+      if (linkedInUrl) {
+        linkedInData = await scrapeLinkedIn(linkedInUrl);
+        console.log("LinkedIn data:", JSON.stringify(linkedInData));
+      }
+    } else {
+      console.log("No Serper key — skipping web search, using AI knowledge only");
+    }
+
+    // ── 7. Build research context for AI ───────────────────
+    const researchContext = [
+      linkedInUrl ? `LinkedIn URL: ${linkedInUrl}` : "",
+      linkedInData.employeeRange ? `LinkedIn Employee Range: ${linkedInData.employeeRange} employees` : "",
+      linkedInData.employeeCount ? `LinkedIn Staff Count: ${linkedInData.employeeCount}` : "",
+      linkedInData.hqLocation ? `LinkedIn HQ Location: ${linkedInData.hqLocation}` : "",
+      linkedInData.founded ? `Founded: ${linkedInData.founded}` : "",
+      linkedInData.about ? `LinkedIn About: ${linkedInData.about}` : "",
+      webSearchContext ? `\nWeb Search Results:\n${webSearchContext}` : "",
+    ].filter(Boolean).join("\n");
+
+    // ── 8. Call Groq ────────────────────────────────────────
+    const userMessage = `Research this company and return the complete 20-field JSON profile.
+
+Website: ${website}
+Company Name (extracted): ${companyName}
+
+${researchContext ? `=== REAL DATA FROM WEB RESEARCH ===\n${researchContext}\n\nUse the above real data to fill fields accurately. LinkedIn employee count is the most reliable source for company size.` : "No web research data available — use your training knowledge."}
+
+Important:
+- If LinkedIn URL was found above, use it exactly as provided
+- If LinkedIn employee range is provided, use it for employeeCount and accountTypeBySize
+- If HQ location is provided, use it for billingCity/State/Country
+- For any fields not covered by research data, use confident inference based on company type and region
+- For Indian companies: region=India, timezone=IST/UTC+5:30`;
 
     const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
@@ -269,7 +377,7 @@ serve(async (req: Request) => {
         response_format: { type: "json_object" },
         messages: [
           { role: "system", content: SYSTEM_PROMPT },
-          { role: "user", content: `Research this company thoroughly using all your knowledge and return the complete 20-field JSON profile.\n\nWebsite: ${website}\n\nIMPORTANT: Use confident inference — do not return Unknown for fields you can reasonably determine from the company name, domain, industry, or region. For Indian companies always provide city, state, country=India, region=India, timezone=IST/UTC+5:30.` }
+          { role: "user", content: userMessage },
         ],
       }),
     });
@@ -286,13 +394,12 @@ serve(async (req: Request) => {
     let rawText = groqData?.choices?.[0]?.message?.content || "";
 
     if (!rawText) {
-      console.error("Empty Groq response:", JSON.stringify(groqData));
       return new Response(JSON.stringify({ error: "Empty AI response. Please try again." }), {
         status: 502, headers: { ...CORS, "Content-Type": "application/json" },
       });
     }
 
-    // ── 5. Parse JSON ───────────────────────────────────────
+    // ── 9. Parse JSON ───────────────────────────────────────
     const jsonMatch = rawText.match(/```(?:json)?\s*([\s\S]*?)```/);
     if (jsonMatch) rawText = jsonMatch[1];
     else {
@@ -311,7 +418,12 @@ serve(async (req: Request) => {
       });
     }
 
-    // ── 6. Return ───────────────────────────────────────────
+    // ── 10. Override with real LinkedIn URL if found ────────
+    if (linkedInUrl && linkedInUrl.includes("linkedin.com/company/")) {
+      enriched.accountLinkedIn = linkedInUrl;
+    }
+
+    // ── 11. Return ──────────────────────────────────────────
     return new Response(JSON.stringify({ data: enriched, remaining }), {
       status: 200,
       headers: { ...CORS, "Content-Type": "application/json", "X-RateLimit-Remaining": String(remaining) },
