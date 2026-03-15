@@ -74,10 +74,12 @@ interface LinkedInData {
   companyType: string;
   website: string;
   about: string;
+  engineeringTeamSize: string;
+  devOpsTeamSize: string;
 }
 
 async function scrapeLinkedIn(linkedinUrl: string): Promise<LinkedInData> {
-  const empty: LinkedInData = { employeeCount: "", employeeRange: "", hqLocation: "", founded: "", industry: "", companyType: "", website: "", about: "" };
+  const empty: LinkedInData = { employeeCount: "", employeeRange: "", hqLocation: "", founded: "", industry: "", companyType: "", website: "", about: "", engineeringTeamSize: "", devOpsTeamSize: "" };
   try {
     // LinkedIn blocks most scrapers — use a User-Agent that mimics a real browser
     const res = await fetch(linkedinUrl, {
@@ -127,7 +129,28 @@ async function scrapeLinkedIn(linkedinUrl: string): Promise<LinkedInData> {
     const typeMatch = html.match(/[Cc]ompany [Tt]ype[^:]*:\s*([^\n<]+)/);
     const companyType = typeMatch ? typeMatch[1].trim() : "";
 
-    return { employeeCount, employeeRange, hqLocation, founded, industry: "", companyType, website: "", about };
+    // Extract Engineering team size from LinkedIn
+    // LinkedIn sometimes shows "Engineering: 120 employees" or "Software Engineering · 500+"
+    const engMatch = html.match(/[Ee]ngineering[^<
+]*?(\d[\d,]+)\s*(?:employees?|members?)/i) ||
+                     html.match(/Software\s*Engineering[^<
+]*?(\d[\d,]+)/i) ||
+                     html.match(/[Tt]echnology[^<
+]*?(\d[\d,]+)\s*(?:employees?|members?)/i);
+    const engineeringTeamSize = engMatch ? engMatch[1].replace(/,/g,"") : "";
+
+    // Extract DevOps / Infrastructure team size
+    const devopsMatch = html.match(/[Dd]ev[Oo]ps[^<
+]*?(\d[\d,]+)\s*(?:employees?|members?)/i) ||
+                        html.match(/[Ii]nfrastructure[^<
+]*?(\d[\d,]+)\s*(?:employees?|members?)/i) ||
+                        html.match(/[Cc]loud[^<
+]*?(\d[\d,]+)\s*(?:employees?|members?)/i) ||
+                        html.match(/[Pp]latform\s*[Ee]ngineering[^<
+]*?(\d[\d,]+)/i);
+    const devOpsTeamSize = devopsMatch ? devopsMatch[1].replace(/,/g,"") : "";
+
+    return { employeeCount, employeeRange, hqLocation, founded, industry: "", companyType, website: "", about, engineeringTeamSize, devOpsTeamSize };
   } catch (e) {
     console.error("LinkedIn scrape error:", e);
     return empty;
@@ -223,6 +246,25 @@ Multi-cloud: Multi-cloud (AWS, GCP) pattern — list specific platforms
 Infer: Indian startups → AWS/GCP | Travel portals → AWS | Microsoft-stack → Azure
 
 ════════════════════════════════════════════
+ENGINEERING & DEVOPS FIELD FORMAT
+════════════════════════════════════════════
+Both engineeringIT and devOps fields must include team size in this format:
+  engineeringIT: "[Tech Stack] | Team Size: [number or range]"
+  devOps:        "[Tools & Practices] | Team Size: [number or range]"
+
+Use LinkedIn team data if provided in research context. Otherwise estimate:
+Engineering team size from total employees:
+- Pure tech/SaaS: 50-70% | Travel/e-commerce: 20-40% | IT services: 60-80% | FMCG/Retail: 5-15%
+DevOps team size from engineering team:
+- Modern SaaS/cloud-native: 10-20% of engineering | Enterprise: 5-10% of engineering
+
+Examples:
+- engineeringIT: "React, Node.js, Python, Java microservices, PostgreSQL, REST APIs | Team Size: 150-200"
+- devOps: "GitHub Actions, Docker, Kubernetes, Terraform, CI/CD pipelines | Team Size: 20-30"
+- engineeringIT: "Java, Spring Boot, Angular, MySQL, Redis | Team Size: 80-120"
+- devOps: "Jenkins, Ansible, Docker, Kubernetes | Team Size: 10-15"
+
+════════════════════════════════════════════
 INFERENCE RULES (when real data is missing)
 ════════════════════════════════════════════
 - Location: .in domain = India. Infer city from company type (travel/fintech → Gurugram or Bangalore)
@@ -241,9 +283,9 @@ Return ONLY valid JSON:
   "accountName": "Official company name",
   "website": "domain as provided",
   "draInsights": "2-3 sentences: what company does, business model, key products/services, market position",
-  "engineeringIT": "Tech stack from research or inference",
+  "engineeringIT": "Tech stack AND team size combined. Format: '[Tech Stack] | Team Size: [number or range]'. Example: 'React, Node.js, Python, AWS | Team Size: 150-200 engineers'. Use LinkedIn engineering team data if available, else estimate from total headcount.",
   "cloudPlatform": "Cloud platform — single name or Multi-cloud (X, Y) pattern",
-  "devOps": "DevOps tools and CI/CD practices",
+  "devOps": "DevOps tools/practices AND team size combined. Format: '[Tools & Practices] | Team Size: [number or range]'. Example: 'GitHub Actions, Docker, Kubernetes, Terraform | Team Size: 20-30'. Use LinkedIn DevOps team data if available, else estimate.",
   "employeeCount": "Use LinkedIn employee count/range if available, else estimate",
   "accountTypeBySize": "One of: StartUp (<50) | Small (50-200) | Medium (200-500) | Large (500-1000) | X-Large (1000-5000) | XX-Large (5000+)",
   "accountType": "One of: Enterprise | ISV | Consumer Portal | Agency/Service Company | PE/VC Firms",
@@ -359,6 +401,8 @@ serve(async (req: Request) => {
       linkedInUrl ? `LinkedIn URL: ${linkedInUrl}` : "",
       linkedInData.employeeRange ? `LinkedIn Employee Range: ${linkedInData.employeeRange} employees` : "",
       linkedInData.employeeCount ? `LinkedIn Staff Count: ${linkedInData.employeeCount}` : "",
+      linkedInData.engineeringTeamSize ? `LinkedIn Engineering/Tech Team Size: ${linkedInData.engineeringTeamSize} employees (use in engineeringIT field as Team Size)` : "",
+      linkedInData.devOpsTeamSize ? `LinkedIn DevOps/Infrastructure Team Size: ${linkedInData.devOpsTeamSize} employees (use in devOps field as Team Size)` : "",
       linkedInData.hqLocation ? `LinkedIn HQ Location: ${linkedInData.hqLocation}` : "",
       linkedInData.founded ? `Founded: ${linkedInData.founded}` : "",
       linkedInData.about ? `LinkedIn About: ${linkedInData.about}` : "",
