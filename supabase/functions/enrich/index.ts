@@ -42,12 +42,10 @@ PE/VC Firms: Invests capital only. Does not sell products or services. PE = matu
 B2B: sells to businesses | B2C: sells to consumers | B2B and B2C: serves both
 
 ══ CLOUD PLATFORM CLASSIFICATION ══
-Identify the primary cloud/hosting infrastructure. Use these values:
-- Hyperscalers: AWS | Azure (Microsoft Azure) | GCP (Google Cloud)
-- Other Cloud: Oracle Cloud | IBM Cloud | Alibaba Cloud | DigitalOcean | Linode | Vultr
-- Edge/Hosting: Cloudflare | Vercel | Netlify | Heroku | Render
-- On-premise: On-premise (if company runs own data centers)
-- Multi-cloud: Multi-cloud (if uses 2+ major cloud providers)
+Identify the primary cloud/hosting infrastructure the company uses.
+- Single cloud: return the name only e.g. AWS or Azure or GCP or DigitalOcean or Oracle Cloud or IBM Cloud or Alibaba Cloud or Cloudflare or Vercel or Netlify or Heroku or Render or On-premise
+- Multi-cloud: return in this exact pattern → Multi-cloud (AWS, Azure, GCP) listing the specific platforms used in brackets
+  Examples: Multi-cloud (AWS, GCP) | Multi-cloud (AWS, Azure) | Multi-cloud (AWS, Azure, GCP)
 - Unknown: if cannot be determined
 
 ══ ACCOUNT SIZE ══
@@ -85,7 +83,7 @@ Return ONLY a JSON object with exactly these 19 keys:
   "website": "domain provided",
   "draInsights": "2-3 sentence summary of what company does, business model, key products, market position",
   "engineeringIT": "Known tech stack, programming languages, frameworks (e.g. Python, React, Node.js, Java). Write Unknown if not determinable.",
-  "cloudPlatform": "Primary cloud/hosting platform used by the company. Examples: AWS, Azure, GCP, Oracle Cloud, IBM Cloud, Alibaba Cloud, DigitalOcean, Heroku, Vercel, Netlify, Cloudflare, On-premise, Multi-cloud. Write Unknown if not determinable.",
+  "cloudPlatform": "Cloud/hosting platform. Single: AWS | Azure | GCP | DigitalOcean | Oracle Cloud | IBM Cloud | Alibaba Cloud | Cloudflare | Vercel | Netlify | Heroku | On-premise. Multi-cloud: use pattern Multi-cloud (AWS, Azure) listing specific platforms. Write Unknown if not determinable.",
   "devOps": "Known DevOps tools and CI/CD practices (e.g. GitHub Actions, Jenkins, Docker, Kubernetes, Terraform). Write Unknown if not determinable.",
   "employeeCount": "Estimated count or range e.g. 5000 or 1000-5000",
   "accountTypeBySize": "Exactly one of: StartUp (<50) | Small (50-200) | Medium (200-500) | Large (500-1000) | X-Large (1000-5000) | XX-Large (5000+)",
