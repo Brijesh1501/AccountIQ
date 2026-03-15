@@ -265,7 +265,7 @@ OUTPUT — all 20 keys required
 Return ONLY valid JSON:
 {
   "accountName": "Official company name",
-  "website": "domain as provided",
+  "website": "MUST be exactly the domain as provided by user e.g. tripjack.com — never change it to the company name",
   "draInsights": "2-3 sentences: what company does, business model, key products/services, market position",
   "engineeringIT": "Tech stack AND team size combined. Format: '[Tech Stack] | Team Size: [number or range]'. Example: 'React, Node.js, Python, AWS | Team Size: 150-200 engineers'. Use LinkedIn engineering team data if available, else estimate from total headcount.",
   "cloudPlatform": "Cloud platform — single name or Multi-cloud (X, Y) pattern",
@@ -403,11 +403,13 @@ Company Name (extracted): ${companyName}
 ${researchContext ? `=== REAL DATA FROM WEB RESEARCH ===\n${researchContext}\n\nUse the above real data to fill fields accurately. LinkedIn employee count is the most reliable source for company size.` : "No web search data available — use your full training knowledge to fill all fields. Make confident inferences based on company type, domain TLD, and industry context. Do not return Unknown when inference is possible."}
 
 Important:
+- The "website" field MUST be exactly: ${website} — do not change it to the company name
 - If LinkedIn URL was found above, use it exactly as provided
 - If LinkedIn employee range is provided, use it for employeeCount and accountTypeBySize
 - If HQ location is provided, use it for billingCity/State/Country
 - For any fields not covered by research data, use confident inference based on company type and region
-- For Indian companies: region=India, timezone=IST/UTC+5:30`;
+- For Indian companies: region=India, timezone=IST/UTC+5:30
+- Always include devOps field with tools AND team size estimate`;
 
     const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
