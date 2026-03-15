@@ -217,6 +217,8 @@ input[type=checkbox]{accent-color:var(--accent);width:13px;height:13px;cursor:po
 .back-btn:hover{background:rgba(249,115,22,0.13);}
 .role-badge-admin{background:var(--admin-bg);color:var(--admin);border:1px solid var(--admin-border);}
 .role-badge-user{background:var(--accent-glow);color:var(--accent);border:1px solid rgba(79,142,247,0.2);}
+.role-badge-suspended{background:var(--amber-bg);color:var(--amber);border:1px solid var(--amber-border);}
+.role-badge-banned{background:var(--red-bg);color:var(--red);border:1px solid var(--red-border);}
 .rb{display:inline-flex;align-items:center;padding:2px 8px;border-radius:20px;font-size:10px;font-weight:700;}
 
 /* ─── RESPONSIVE ─────────────────────────────────────── */
@@ -650,9 +652,19 @@ input[type=checkbox]{accent-color:var(--accent);width:13px;height:13px;cursor:po
       <!-- ADMIN USERS -->
       <div class="apg" id="apg-users">
         <div class="atw">
-          <div class="ath">
+          <div class="ath" style="flex-wrap:wrap;gap:8px;">
             <span style="font-size:13px;font-weight:600;color:var(--admin);">All Users</span>
-            <div class="sw"><input class="si" id="uSrch" placeholder="Search users..." oninput="filterUsers()"/></div>
+            <div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap;">
+              <div class="sw"><input class="si" id="uSrch" placeholder="Search users..." oninput="filterUsers()"/></div>
+              <select id="uStatusFilter" onchange="filterUsers()" style="background:var(--surface2);border:1px solid rgba(249,115,22,0.2);border-radius:6px;padding:5px 9px;color:var(--text);font-size:12px;font-family:var(--font);outline:none;">
+                <option value="">All Status</option>
+                <option value="user">Active</option>
+                <option value="admin">Admin</option>
+                <option value="suspended">Suspended</option>
+                <option value="banned">Banned</option>
+              </select>
+              <button class="btn btn-a btn-sm" onclick="exportUsersCSV()">Export Users ↓</button>
+            </div>
           </div>
           <div id="usersTbl"><div class="es"><div class="ei">⊙</div><div class="et">Loading users...</div></div></div>
         </div>
@@ -731,6 +743,35 @@ input[type=checkbox]{accent-color:var(--accent);width:13px;height:13px;cursor:po
   </div>
 </div>
 
+<!-- User Detail Modal -->
+<div class="mo" id="userDetailModal">
+  <div class="md" style="width:560px;max-height:85vh;overflow-y:auto;">
+    <h2 id="udmTitle">User Details</h2>
+    <p class="md-sub" id="udmEmail">—</p>
+    <div id="udmBody"></div>
+    <div class="mf">
+      <button class="btn btn-g" onclick="document.getElementById('userDetailModal').classList.remove('open')">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Confirm Delete User Modal -->
+<div class="mo" id="deleteUserModal">
+  <div class="md" style="width:420px;">
+    <h2>Delete User Account</h2>
+    <p class="md-sub">This will permanently delete the user and all their data. This cannot be undone.</p>
+    <div id="deleteUserInfo" style="background:var(--red-bg);border:1px solid var(--red-border);border-radius:8px;padding:12px 14px;font-size:13px;margin-bottom:4px;"></div>
+    <div style="margin-top:14px;">
+      <label class="lbl">Type DELETE to confirm</label>
+      <input class="ipt" id="deleteConfirmInput" placeholder="Type DELETE" style="width:100%;margin-top:6px;" oninput="document.getElementById('confirmDeleteBtn').disabled=this.value!=='DELETE'"/>
+    </div>
+    <div class="mf">
+      <button class="btn btn-g" onclick="document.getElementById('deleteUserModal').classList.remove('open');document.getElementById('deleteConfirmInput').value='';">Cancel</button>
+      <button class="btn btn-d" id="confirmDeleteBtn" disabled onclick="confirmDeleteUser()">Delete Permanently</button>
+    </div>
+  </div>
+</div>
+
 <!-- Detail Drawer -->
 <div class="dr" id="detailDrawer">
   <div class="drh"><span style="font-size:13px;font-weight:600;" id="dTitle">Account</span><button class="btn btn-g btn-sm" onclick="document.getElementById('detailDrawer').classList.remove('open')">✕</button></div>
@@ -800,7 +841,13 @@ create policy "logs_insert" on public.activity_logs for insert with check (true)
 -- update public.profiles set role = 'admin' where email = 'your@email.com';
 
 -- Admin helper functions:
-create or replace function get_all_profiles() returns setof profiles language sql security definer as $$ select * from profiles order by created_at desc; $$;
+create or replace function get_all_profiles()
+returns table (id uuid, email text, full_name text, role text, created_at timestamptz, last_sign_in_at timestamptz)
+language sql security definer as $$
+  select p.id, p.email, p.full_name, p.role, p.created_at, u.last_sign_in_at
+  from profiles p left join auth.users u on u.id = p.id
+  order by p.created_at desc;
+$$;
 create or replace function get_all_accounts() returns setof accounts language sql security definer as $$ select * from accounts order by created_at desc; $$;
 create or replace function get_all_logs() returns setof activity_logs language sql security definer as $$ select * from activity_logs order by created_at desc limit 500; $$;
 create or replace function update_user_role(target_id uuid, new_role text) returns void language sql security definer as $$ update profiles set role = new_role where id = target_id; $$;
@@ -1284,7 +1331,7 @@ async function loadAdminData(){
     SB.rpc('get_all_accounts'),
     SB.rpc('get_all_logs')
   ]);
-  allUsers=users||[];allAdminAccounts=accs||[];allLogs=logs||[];filteredLogs=[...allLogs];filteredAdminAccs=[...allAdminAccounts];
+  allUsers=(users||[]).map(u=>({...u,last_sign_in_at:u.last_sign_in_at||null}));allAdminAccounts=accs||[];allLogs=logs||[];filteredLogs=[...allLogs];filteredAdminAccs=[...allAdminAccounts];
   // Stats
   document.getElementById('a-users').textContent=allUsers.length;
   document.getElementById('a-accs').textContent=allAdminAccounts.length;
@@ -1313,16 +1360,57 @@ function renderOverviewStats(){
 // ─────────────────────────────────────────────────
 // ADMIN USERS TABLE
 // ─────────────────────────────────────────────────
+function getRoleBadgeClass(role){
+  if(role==='admin') return 'role-badge-admin';
+  if(role==='suspended') return 'role-badge-suspended';
+  if(role==='banned') return 'role-badge-banned';
+  return 'role-badge-user';
+}
+
 function renderUsersTbl(){
   const q=(document.getElementById('uSrch')?.value||'').toLowerCase();
-  const users=allUsers.filter(u=>!q||u.email?.toLowerCase().includes(q)||u.full_name?.toLowerCase().includes(q));
+  const statusFilter=(document.getElementById('uStatusFilter')?.value||'');
+  let users=allUsers.filter(u=>{
+    const mq=!q||u.email?.toLowerCase().includes(q)||u.full_name?.toLowerCase().includes(q);
+    const ms=!statusFilter||(u.role||'user')===statusFilter;
+    return mq&&ms;
+  });
   const el=document.getElementById('usersTbl');
   if(!users.length){el.innerHTML=`<div class="es"><div class="ei">⊙</div><div class="et">No users found</div></div>`;return;}
   const accCounts={};allAdminAccounts.forEach(a=>{accCounts[a.user_id]=(accCounts[a.user_id]||0)+1;});
-  el.innerHTML=`<div class="ts"><table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Accounts</th><th>Joined</th><th>Actions</th></tr></thead><tbody>${users.map(u=>{
-    const isA=u.role==='admin',cnt=accCounts[u.id]||0;
-    return`<tr><td style="font-weight:500">${u.full_name||'—'}</td><td style="font-family:var(--mono);font-size:11px;">${u.email||'—'}</td><td><span class="rb ${isA?'role-badge-admin':'role-badge-user'}">${u.role||'user'}</span></td><td style="text-align:center;"><span class="badge b-gray">${cnt}</span></td><td style="font-size:11px;color:var(--text3)">${fmtDate(u.created_at).split(' ')[0]+' '+fmtDate(u.created_at).split(' ')[1]}</td><td><div style="display:flex;gap:5px;"><button class="btn btn-a btn-sm" onclick="openRoleModal('${u.id}','${u.email}','${u.role||'user'}')">Role</button><button class="btn btn-d btn-sm" onclick="adminDeleteUserAccounts('${u.id}','${u.email}')">Del Accs</button></div></td></tr>`;
-  }).join('')}</tbody></table></div>`;
+  const selectedUsers=new Set(window._selectedUsers||[]);
+  el.innerHTML=`<div class="ts"><table><thead><tr>
+    <th style="width:32px"><input type="checkbox" id="selAllUsers" onchange="toggleAllUsers(this)"/></th>
+    <th>Name</th><th>Email</th><th>Status</th><th>Accounts</th><th>Joined</th><th>Last Active</th><th>Actions</th>
+  </tr></thead><tbody>${users.map(u=>{
+    const role=u.role||'user';
+    const cnt=accCounts[u.id]||0;
+    const isSuspended=role==='suspended';
+    const isBanned=role==='banned';
+    const rowStyle=isBanned?'opacity:0.5;':isSuspended?'opacity:0.7;':'';
+    return`<tr style="${rowStyle}">
+      <td><input type="checkbox" class="urc" value="${u.id}" ${selectedUsers.has(u.id)?'checked':''} onchange="toggleUserSel(this)"></td>
+      <td style="font-weight:500;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${u.full_name||'—'}</td>
+      <td style="font-family:var(--mono);font-size:11px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${u.email||'—'}</td>
+      <td><span class="rb ${getRoleBadgeClass(role)}">${role}</span></td>
+      <td style="text-align:center;"><span class="badge b-gray">${cnt}</span></td>
+      <td style="font-size:11px;color:var(--text3);">${fmtDate(u.created_at).slice(0,12)}</td>
+      <td style="font-size:11px;color:var(--text3);">${u.last_sign_in_at?fmtDate(u.last_sign_in_at).slice(0,12):'—'}</td>
+      <td><div style="display:flex;gap:4px;flex-wrap:wrap;">
+        <button class="btn btn-g btn-sm" onclick="openUserDetail('${u.id}')">View</button>
+        <button class="btn btn-a btn-sm" onclick="openRoleModal('${u.id}','${u.email}','${role}')">Role</button>
+        ${!isSuspended&&!isBanned?`<button class="btn btn-sm" style="background:var(--amber-bg);color:var(--amber);border:1px solid var(--amber-border);" onclick="suspendUser('${u.id}','${u.email}')">Suspend</button>`:''}
+        ${isSuspended?`<button class="btn btn-sm" style="background:var(--green-bg);color:var(--green);border:1px solid var(--green-border);" onclick="reactivateUser('${u.id}','${u.email}')">Reactivate</button>`:''}
+        <button class="btn btn-d btn-sm" onclick="openDeleteUserModal('${u.id}','${u.email}','${u.full_name||''}')">Delete</button>
+      </div></td>
+    </tr>`;
+  }).join('')}</tbody></table></div>
+  ${selectedUsers.size>0?`<div style="padding:10px 14px;border-top:1px solid var(--border);display:flex;align-items:center;gap:10px;">
+    <span style="font-size:12px;color:var(--text3);">${selectedUsers.size} selected</span>
+    <button class="btn btn-d btn-sm" onclick="bulkDeleteUsers()">Delete Selected</button>
+    <button class="btn btn-sm" style="background:var(--amber-bg);color:var(--amber);border:1px solid var(--amber-border);" onclick="bulkSuspendUsers()">Suspend Selected</button>
+    <button class="btn btn-g btn-sm" onclick="clearUserSelection()">Clear</button>
+  </div>`:''}`;
 }
 function filterUsers(){renderUsersTbl();}
 
@@ -1398,6 +1486,173 @@ async function clearLogs(){
   if(!confirm('Clear all activity logs?'))return;
   await SB.rpc('clear_activity_logs');allLogs=[];filteredLogs=[];renderLogsPage();document.getElementById('a-logs').textContent=0;
   renderAdminLogs([],document.getElementById('recentLogs'));toast('Logs cleared','success');
+}
+
+// ─────────────────────────────────────────────────
+// USER MANAGEMENT — ADMIN
+// ─────────────────────────────────────────────────
+window._selectedUsers = new Set();
+window._deleteTarget = null;
+
+function toggleUserSel(cb){
+  if(cb.checked) window._selectedUsers.add(cb.value);
+  else window._selectedUsers.delete(cb.value);
+  renderUsersTbl();
+}
+function toggleAllUsers(cb){
+  document.querySelectorAll('.urc').forEach(c=>{
+    c.checked=cb.checked;
+    if(cb.checked) window._selectedUsers.add(c.value);
+    else window._selectedUsers.delete(c.value);
+  });
+  renderUsersTbl();
+}
+function clearUserSelection(){
+  window._selectedUsers=new Set();
+  renderUsersTbl();
+}
+function filterUsers(){renderUsersTbl();}
+
+// ── Suspend user ──────────────────────────────────
+async function suspendUser(uid, email){
+  if(!confirm(`Suspend ${email}? They will not be able to log in.`)) return;
+  await SB.rpc('update_user_role',{target_id:uid, new_role:'suspended'});
+  await logEvent('role',`Admin suspended user: ${email}`,{uid});
+  const u=allUsers.find(x=>x.id===uid); if(u) u.role='suspended';
+  renderUsersTbl();
+  document.getElementById('a-admins').textContent=allUsers.filter(u=>u.role==='admin').length;
+  toast(`${email} suspended`,'success');
+}
+
+// ── Reactivate user ───────────────────────────────
+async function reactivateUser(uid, email){
+  if(!confirm(`Reactivate ${email}?`)) return;
+  await SB.rpc('update_user_role',{target_id:uid, new_role:'user'});
+  await logEvent('role',`Admin reactivated user: ${email}`,{uid});
+  const u=allUsers.find(x=>x.id===uid); if(u) u.role='user';
+  renderUsersTbl();
+  toast(`${email} reactivated`,'success');
+}
+
+// ── Delete user modal ─────────────────────────────
+function openDeleteUserModal(uid, email, name){
+  window._deleteTarget={uid, email, name};
+  document.getElementById('deleteUserInfo').innerHTML=`
+    <div style="font-weight:500;margin-bottom:4px;">${name||email}</div>
+    <div style="font-size:12px;color:var(--red);">${email}</div>
+    <div style="font-size:11px;color:var(--text3);margin-top:6px;">All accounts (${allAdminAccounts.filter(a=>a.user_id===uid).length} records) will also be deleted.</div>`;
+  document.getElementById('deleteConfirmInput').value='';
+  document.getElementById('confirmDeleteBtn').disabled=true;
+  document.getElementById('deleteUserModal').classList.add('open');
+}
+
+async function confirmDeleteUser(){
+  const t=window._deleteTarget; if(!t) return;
+  // Delete all accounts first
+  await SB.rpc('delete_user_accounts',{target_id:t.uid});
+  // Delete profile
+  await SB.from('profiles').delete().eq('id',t.uid);
+  await logEvent('delete',`Admin deleted user: ${t.email}`,{uid:t.uid});
+  allUsers=allUsers.filter(u=>u.id!==t.uid);
+  allAdminAccounts=allAdminAccounts.filter(a=>a.user_id!==t.uid);
+  filteredAdminAccs=[...allAdminAccounts];
+  document.getElementById('deleteUserModal').classList.remove('open');
+  document.getElementById('deleteConfirmInput').value='';
+  window._deleteTarget=null;
+  renderUsersTbl(); renderAdminAccsTbl(); renderOverviewStats();
+  document.getElementById('a-users').textContent=allUsers.length;
+  document.getElementById('a-accs').textContent=allAdminAccounts.length;
+  document.getElementById('a-admins').textContent=allUsers.filter(u=>u.role==='admin').length;
+  toast(`User ${t.email} deleted permanently`,'success');
+}
+
+// ── Bulk delete users ─────────────────────────────
+async function bulkDeleteUsers(){
+  const ids=[...window._selectedUsers];
+  if(!ids.length) return;
+  const emails=ids.map(id=>allUsers.find(u=>u.id===id)?.email||id).join(', ');
+  if(!confirm(`Permanently delete ${ids.length} user(s)?
+${emails}
+
+This cannot be undone.`)) return;
+  for(const uid of ids){
+    await SB.rpc('delete_user_accounts',{target_id:uid});
+    await SB.from('profiles').delete().eq('id',uid);
+  }
+  await logEvent('delete',`Admin bulk deleted ${ids.length} users`);
+  allUsers=allUsers.filter(u=>!ids.includes(u.id));
+  allAdminAccounts=allAdminAccounts.filter(a=>!ids.includes(a.user_id));
+  filteredAdminAccs=[...allAdminAccounts];
+  window._selectedUsers=new Set();
+  renderUsersTbl(); renderAdminAccsTbl(); renderOverviewStats();
+  document.getElementById('a-users').textContent=allUsers.length;
+  document.getElementById('a-accs').textContent=allAdminAccounts.length;
+  document.getElementById('a-admins').textContent=allUsers.filter(u=>u.role==='admin').length;
+  toast(`${ids.length} users deleted`,'success');
+}
+
+// ── Bulk suspend users ────────────────────────────
+async function bulkSuspendUsers(){
+  const ids=[...window._selectedUsers];
+  if(!ids.length) return;
+  if(!confirm(`Suspend ${ids.length} user(s)?`)) return;
+  for(const uid of ids){
+    await SB.rpc('update_user_role',{target_id:uid, new_role:'suspended'});
+    const u=allUsers.find(x=>x.id===uid); if(u) u.role='suspended';
+  }
+  await logEvent('role',`Admin bulk suspended ${ids.length} users`);
+  window._selectedUsers=new Set();
+  renderUsersTbl();
+  toast(`${ids.length} users suspended`,'success');
+}
+
+// ── User detail modal ─────────────────────────────
+function openUserDetail(uid){
+  const u=allUsers.find(x=>x.id===uid); if(!u) return;
+  const accCount=allAdminAccounts.filter(a=>a.user_id===uid).length;
+  const userAccs=allAdminAccounts.filter(a=>a.user_id===uid).slice(0,5);
+  const logCount=allLogs.filter(l=>l.user_id===uid).length;
+  const lastLog=allLogs.find(l=>l.user_id===uid);
+  document.getElementById('udmTitle').textContent=u.full_name||u.email;
+  document.getElementById('udmEmail').textContent=u.email;
+  document.getElementById('udmBody').innerHTML=`
+    <div style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:16px;">
+      <span class="rb ${getRoleBadgeClass(u.role||'user')}">${u.role||'user'}</span>
+      <span class="badge b-gray">${accCount} accounts</span>
+      <span class="badge b-gray">${logCount} log entries</span>
+    </div>
+    <div class="di"></div>
+    <div class="dsec">Account Info</div>
+    ${[['User ID',`<span style="font-family:var(--mono);font-size:11px;">${u.id}</span>`],['Email',u.email],['Full Name',u.full_name||'—'],['Role',u.role||'user'],['Joined',fmtDate(u.created_at)],['Last Login',u.last_sign_in_at?fmtDate(u.last_sign_in_at):'—']].map(([k,v])=>`<div class="drow"><div class="dk">${k}</div><div class="dv">${v||'—'}</div></div>`).join('')}
+    <div class="dsec" style="margin-top:14px;">Recent Accounts (${accCount} total)</div>
+    ${userAccs.length?`<table style="width:100%;border-collapse:collapse;font-size:12px;">${userAccs.map(a=>`<tr><td style="padding:7px 0;border-bottom:1px solid var(--border);font-family:var(--mono);color:var(--accent)">${a.website||'—'}</td><td style="padding:7px 0;border-bottom:1px solid var(--border);">${a.account_type||'—'}</td><td style="padding:7px 0;border-bottom:1px solid var(--border);color:var(--text3)">${a.industry||'—'}</td></tr>`).join('')}</table>
+    ${accCount>5?`<div style="font-size:11px;color:var(--text3);margin-top:6px;">+${accCount-5} more accounts</div>`:''}`:
+    '<div style="font-size:12px;color:var(--text3);padding:8px 0;">No accounts yet</div>'}
+    <div class="dsec" style="margin-top:14px;">Last Activity</div>
+    ${lastLog?`<div style="font-size:12px;color:var(--text2);padding:8px 0;border-bottom:1px solid var(--border);">
+      <span style="color:var(--text3);">${fmtDate(lastLog.created_at)}</span> — ${lastLog.message||lastLog.event_type}
+    </div>`:'<div style="font-size:12px;color:var(--text3);padding:8px 0;">No activity logged</div>'}
+    <div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:16px;">
+      <button class="btn btn-a btn-sm" onclick="openRoleModal('${u.id}','${u.email}','${u.role||'user'}');document.getElementById('userDetailModal').classList.remove('open')">Change Role</button>
+      ${u.role!=='suspended'?`<button class="btn btn-sm" style="background:var(--amber-bg);color:var(--amber);border:1px solid var(--amber-border);" onclick="suspendUser('${u.id}','${u.email}');document.getElementById('userDetailModal').classList.remove('open')">Suspend User</button>`:''}
+      ${u.role==='suspended'?`<button class="btn btn-sm" style="background:var(--green-bg);color:var(--green);border:1px solid var(--green-border);" onclick="reactivateUser('${u.id}','${u.email}');document.getElementById('userDetailModal').classList.remove('open')">Reactivate</button>`:''}
+      <button class="btn btn-d btn-sm" onclick="document.getElementById('userDetailModal').classList.remove('open');openDeleteUserModal('${u.id}','${u.email}','${u.full_name||''}')">Delete User</button>
+    </div>`;
+  document.getElementById('userDetailModal').classList.add('open');
+}
+
+// ── Export users CSV ──────────────────────────────
+function exportUsersCSV(){
+  const accCounts={};allAdminAccounts.forEach(a=>{accCounts[a.user_id]=(accCounts[a.user_id]||0)+1;});
+  const rows=[['Full Name','Email','Role','Accounts','Joined','Last Login'],...allUsers.map(u=>[
+    u.full_name||'',u.email||'',u.role||'user',
+    accCounts[u.id]||0,
+    u.created_at?new Date(u.created_at).toLocaleDateString():'',
+    u.last_sign_in_at?new Date(u.last_sign_in_at).toLocaleDateString():''
+  ])];
+  const csv=rows.map(r=>r.map(c=>'"'+String(c).replace(/"/g,'""')+'"').join(',')).join('\n');
+  dlCSV(csv,'users_export.csv');
+  toast('Exported '+allUsers.length+' users','success');
 }
 
 // ─────────────────────────────────────────────────
