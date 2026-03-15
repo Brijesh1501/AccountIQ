@@ -81,7 +81,6 @@ interface LinkedInData {
 async function scrapeLinkedIn(linkedinUrl: string): Promise<LinkedInData> {
   const empty: LinkedInData = { employeeCount: "", employeeRange: "", hqLocation: "", founded: "", industry: "", companyType: "", website: "", about: "", engineeringTeamSize: "", devOpsTeamSize: "" };
   try {
-    // LinkedIn blocks most scrapers — use a User-Agent that mimics a real browser
     const res = await fetch(linkedinUrl, {
       headers: {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -90,57 +89,50 @@ async function scrapeLinkedIn(linkedinUrl: string): Promise<LinkedInData> {
         "Cache-Control": "no-cache",
       },
     });
-
-    if (!res.ok) {
-      console.log("LinkedIn fetch status:", res.status);
-      return empty;
-    }
+    if (!res.ok) { console.log("LinkedIn fetch status:", res.status); return empty; }
 
     const html = await res.text();
 
-    // Extract employee count — LinkedIn shows "1,001-5,000 employees" or "501-1,000 employees"
-    const empRangeMatch = html.match(/(\d[\d,]*[-–]\d[\d,]*)\s*employees/i) ||
+    // Employee range e.g. "1,001-5,000 employees"
+    const empRangeMatch = html.match(/(\d[\d,]*[-]\d[\d,]*)\s*employees/i) ||
                           html.match(/"staffCount"\s*:\s*(\d+)/i) ||
                           html.match(/(\d[\d,]+)\s*employees/i);
     const employeeRange = empRangeMatch ? empRangeMatch[1].replace(/,/g, "") : "";
 
-    // Extract staff count from JSON-LD or meta
+    // Exact staff count from structured data
     const staffMatch = html.match(/"numberOfEmployees"[^}]*"value"\s*:\s*(\d+)/) ||
                        html.match(/"staffCount"\s*:\s*(\d+)/);
     const employeeCount = staffMatch ? staffMatch[1] : "";
 
-    // Extract HQ location
+    // HQ location from structured data
     const hqMatch = html.match(/"addressLocality"\s*:\s*"([^"]+)"/) ||
-                    html.match(/headquartered in ([^<\n,]+)/i) ||
                     html.match(/"addressCountry"\s*:\s*"([^"]+)"/);
     const hqLocation = hqMatch ? hqMatch[1].trim() : "";
 
-    // Extract founded year
+    // Founded year
     const foundedMatch = html.match(/[Ff]ounded\s*[:\s]*(\d{4})/) ||
                          html.match(/"foundingDate"\s*:\s*"(\d{4})"/);
     const founded = foundedMatch ? foundedMatch[1] : "";
 
-    // Extract about/description
-    const aboutMatch = html.match(/<meta\s+name="description"\s+content="([^"]{50,500})"/i) ||
-                       html.match(/class="[^"]*description[^"]*"[^>]*>([^<]{50,400})</i);
+    // About/description from meta tag
+    const aboutMatch = html.match(/<meta\s+name="description"\s+content="([^"]{50,500})"/i);
     const about = aboutMatch ? aboutMatch[1].trim() : "";
 
-    // Extract company type
-    const typeMatch = html.match(/[Cc]ompany [Tt]ype[^:<]{0,30}:\s*([^<]{1,50})/);
+    // Company type
+    const typeMatch = html.match(/[Cc]ompany [Tt]ype[^:]{0,20}:\s*([^<]{1,50})/);
     const companyType = typeMatch ? typeMatch[1].trim() : "";
 
-    // Extract Engineering team size from LinkedIn
-    // LinkedIn sometimes shows "Engineering: 120 employees" or "Software Engineering · 500+"
-    const engMatch = html.match(/[Ee]ngineering[^<]{0,60}?(\d[\d,]+)\s*(?:employees?|members?)/i) ||
-                     html.match(/Software Engineering[^<]{0,40}?(\d[\d,]+)/i) ||
-                     html.match(/[Tt]echnology[^<]{0,60}?(\d[\d,]+)\s*(?:employees?|members?)/i);
-    const engineeringTeamSize = engMatch ? engMatch[1].replace(/,/g,"") : "";
+    // Engineering team size — look for patterns like "Engineering · 120" or "150 in Engineering"
+    const engMatch = html.match(/Engineering[^<]{0,50}(\d[\d,]+)\s*(?:employees?|members?)/i) ||
+                     html.match(/(\d[\d,]+)\s*(?:employees?|members?)[^<]{0,30}Engineering/i) ||
+                     html.match(/"Engineering"\s*[^}]{0,100}"memberCount"\s*:\s*(\d+)/i);
+    const engineeringTeamSize = engMatch ? engMatch[1].replace(/,/g, "") : "";
 
-    // Extract DevOps / Infrastructure team size
-    const devopsMatch = html.match(/DevOps[^<]{0,60}?(\d[\d,]+)\s*(?:employees?|members?)/i) ||
-                        html.match(/Infrastructure[^<]{0,60}?(\d[\d,]+)\s*(?:employees?|members?)/i) ||
-                        html.match(/Platform Engineering[^<]{0,40}?(\d[\d,]+)/i);
-    const devOpsTeamSize = devopsMatch ? devopsMatch[1].replace(/,/g,"") : "";
+    // DevOps team size
+    const devopsMatch = html.match(/DevOps[^<]{0,50}(\d[\d,]+)\s*(?:employees?|members?)/i) ||
+                        html.match(/Infrastructure[^<]{0,50}(\d[\d,]+)\s*(?:employees?|members?)/i) ||
+                        html.match(/"DevOps"\s*[^}]{0,100}"memberCount"\s*:\s*(\d+)/i);
+    const devOpsTeamSize = devopsMatch ? devopsMatch[1].replace(/,/g, "") : "";
 
     return { employeeCount, employeeRange, hqLocation, founded, industry: "", companyType, website: "", about, engineeringTeamSize, devOpsTeamSize };
   } catch (e) {
