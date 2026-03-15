@@ -220,6 +220,11 @@ input[type=checkbox]{accent-color:var(--accent);width:13px;height:13px;cursor:po
 .role-badge-suspended{background:var(--amber-bg);color:var(--amber);border:1px solid var(--amber-border);}
 .role-badge-banned{background:var(--red-bg);color:var(--red);border:1px solid var(--red-border);}
 .rb{display:inline-flex;align-items:center;padding:2px 8px;border-radius:20px;font-size:10px;font-weight:700;}
+.auth-msg{border-radius:8px;padding:10px 12px;font-size:12px;margin-bottom:12px;line-height:1.5;}
+.auth-msg.err{background:var(--red-bg);border:1px solid var(--red-border);color:var(--red);}
+.auth-msg.ok{background:var(--green-bg);border:1px solid var(--green-border);color:var(--green);}
+.form-group{margin-bottom:13px;}
+.form-label{font-size:11px;font-weight:600;color:var(--text2);margin-bottom:5px;display:block;text-transform:uppercase;letter-spacing:0.05em;}
 
 /* ─── RESPONSIVE ─────────────────────────────────────── */
 
@@ -664,6 +669,7 @@ input[type=checkbox]{accent-color:var(--accent);width:13px;height:13px;cursor:po
                 <option value="banned">Banned</option>
               </select>
               <button class="btn btn-a btn-sm" onclick="exportUsersCSV()">Export Users ↓</button>
+              <button class="btn btn-p btn-sm" onclick="openAddUserModal()">+ Add User</button>
             </div>
           </div>
           <div id="usersTbl"><div class="es"><div class="ei">⊙</div><div class="et">Loading users...</div></div></div>
@@ -739,6 +745,74 @@ input[type=checkbox]{accent-color:var(--accent);width:13px;height:13px;cursor:po
     <div class="mf">
       <button class="btn btn-g" onclick="document.getElementById('roleModal').classList.remove('open')">Cancel</button>
       <button class="btn btn-a" onclick="confirmRoleChange()">Update Role</button>
+    </div>
+  </div>
+</div>
+
+<!-- Add User Modal -->
+<div class="mo" id="addUserModal">
+  <div class="md" style="width:480px;">
+    <h2>Add New User</h2>
+    <p class="md-sub">Create a new user account manually.</p>
+    <div id="addUserMsg"></div>
+    <div class="form-group">
+      <label class="form-label">Full Name</label>
+      <input class="ipt" id="addUserName" placeholder="Jane Smith" style="width:100%"/>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Email Address</label>
+      <input class="ipt" id="addUserEmail" type="email" placeholder="jane@company.com" style="width:100%"/>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Password</label>
+      <input class="ipt" id="addUserPassword" type="password" placeholder="Minimum 8 characters" style="width:100%"/>
+      <div class="hint">User can change this after first login.</div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Role</label>
+      <select class="ipt" id="addUserRole" style="width:100%;">
+        <option value="user">User</option>
+        <option value="admin">Admin</option>
+      </select>
+    </div>
+    <div class="mf">
+      <button class="btn btn-g" onclick="closeAddUserModal()">Cancel</button>
+      <button class="btn btn-p" id="addUserBtn" onclick="submitAddUser()">Create User</button>
+    </div>
+  </div>
+</div>
+
+<!-- Edit User Modal -->
+<div class="mo" id="editUserModal">
+  <div class="md" style="width:480px;">
+    <h2>Edit User</h2>
+    <p class="md-sub" id="editUserSubtitle">Update user details</p>
+    <div id="editUserMsg"></div>
+    <div class="form-group">
+      <label class="form-label">Full Name</label>
+      <input class="ipt" id="editUserName" placeholder="Full name" style="width:100%"/>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Email Address</label>
+      <input class="ipt" id="editUserEmail" type="email" placeholder="Email" style="width:100%"/>
+      <div class="hint">Changing email will require the user to verify the new address.</div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">New Password <span style="color:var(--text3);font-weight:400;">(leave blank to keep current)</span></label>
+      <input class="ipt" id="editUserPassword" type="password" placeholder="Leave blank to keep unchanged" style="width:100%"/>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Role</label>
+      <select class="ipt" id="editUserRole" style="width:100%;">
+        <option value="user">User</option>
+        <option value="admin">Admin</option>
+        <option value="suspended">Suspended</option>
+        <option value="banned">Banned</option>
+      </select>
+    </div>
+    <div class="mf">
+      <button class="btn btn-g" onclick="closeEditUserModal()">Cancel</button>
+      <button class="btn btn-p" id="editUserBtn" onclick="submitEditUser()">Save Changes</button>
     </div>
   </div>
 </div>
@@ -1398,6 +1472,7 @@ function renderUsersTbl(){
       <td style="font-size:11px;color:var(--text3);">${u.last_sign_in_at?fmtDate(u.last_sign_in_at).slice(0,12):'—'}</td>
       <td><div style="display:flex;gap:4px;flex-wrap:wrap;">
         <button class="btn btn-g btn-sm" onclick="openUserDetail('${u.id}')">View</button>
+        <button class="btn btn-s btn-sm" onclick="openEditUserModal('${u.id}')">Edit</button>
         <button class="btn btn-a btn-sm" onclick="openRoleModal('${u.id}','${u.email}','${role}')">Role</button>
         ${!isSuspended&&!isBanned?`<button class="btn btn-sm" style="background:var(--amber-bg);color:var(--amber);border:1px solid var(--amber-border);" onclick="suspendUser('${u.id}','${u.email}')">Suspend</button>`:''}
         ${isSuspended?`<button class="btn btn-sm" style="background:var(--green-bg);color:var(--green);border:1px solid var(--green-border);" onclick="reactivateUser('${u.id}','${u.email}')">Reactivate</button>`:''}
@@ -1633,12 +1708,152 @@ function openUserDetail(uid){
       <span style="color:var(--text3);">${fmtDate(lastLog.created_at)}</span> — ${lastLog.message||lastLog.event_type}
     </div>`:'<div style="font-size:12px;color:var(--text3);padding:8px 0;">No activity logged</div>'}
     <div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:16px;">
+      <button class="btn btn-s btn-sm" onclick="document.getElementById('userDetailModal').classList.remove('open');openEditUserModal('${u.id}')">Edit User</button>
       <button class="btn btn-a btn-sm" onclick="openRoleModal('${u.id}','${u.email}','${u.role||'user'}');document.getElementById('userDetailModal').classList.remove('open')">Change Role</button>
       ${u.role!=='suspended'?`<button class="btn btn-sm" style="background:var(--amber-bg);color:var(--amber);border:1px solid var(--amber-border);" onclick="suspendUser('${u.id}','${u.email}');document.getElementById('userDetailModal').classList.remove('open')">Suspend User</button>`:''}
       ${u.role==='suspended'?`<button class="btn btn-sm" style="background:var(--green-bg);color:var(--green);border:1px solid var(--green-border);" onclick="reactivateUser('${u.id}','${u.email}');document.getElementById('userDetailModal').classList.remove('open')">Reactivate</button>`:''}
       <button class="btn btn-d btn-sm" onclick="document.getElementById('userDetailModal').classList.remove('open');openDeleteUserModal('${u.id}','${u.email}','${u.full_name||''}')">Delete User</button>
     </div>`;
   document.getElementById('userDetailModal').classList.add('open');
+}
+
+// ── Add User ─────────────────────────────────────
+function openAddUserModal(){
+  document.getElementById('addUserName').value='';
+  document.getElementById('addUserEmail').value='';
+  document.getElementById('addUserPassword').value='';
+  document.getElementById('addUserRole').value='user';
+  document.getElementById('addUserMsg').innerHTML='';
+  document.getElementById('addUserModal').classList.add('open');
+}
+function closeAddUserModal(){
+  document.getElementById('addUserModal').classList.remove('open');
+}
+
+async function submitAddUser(){
+  const name=document.getElementById('addUserName').value.trim();
+  const email=document.getElementById('addUserEmail').value.trim();
+  const password=document.getElementById('addUserPassword').value;
+  const role=document.getElementById('addUserRole').value;
+  const msgEl=document.getElementById('addUserMsg');
+
+  if(!email||!password){msgEl.innerHTML=`<div class="auth-msg err">Email and password are required.</div>`;return;}
+  if(password.length<8){msgEl.innerHTML=`<div class="auth-msg err">Password must be at least 8 characters.</div>`;return;}
+
+  const btn=document.getElementById('addUserBtn');
+  btn.disabled=true;btn.textContent='Creating...';
+  msgEl.innerHTML='';
+
+  try{
+    // Use Supabase admin signUp via service — we use the anon client but create profile after
+    const{data,error}=await SB.auth.admin?
+      SB.auth.admin.createUser({email,password,email_confirm:true,user_metadata:{full_name:name}}):
+      {data:null,error:{message:'Admin API not available. Use Supabase dashboard to create users directly.'}};
+
+    if(error){
+      // Fallback: try regular signUp and handle profile
+      const{data:sd,error:se}=await SB.auth.signUp({email,password,options:{data:{full_name:name}}});
+      if(se)throw new Error(se.message);
+      if(sd.user){
+        await SB.from('profiles').upsert({id:sd.user.id,email,full_name:name,role});
+        const newUser={id:sd.user.id,email,full_name:name,role,created_at:new Date().toISOString(),last_sign_in_at:null};
+        allUsers.unshift(newUser);
+        await logEvent('register',`Admin created user: ${email}`,{email,name,role});
+        closeAddUserModal();
+        renderUsersTbl();
+        document.getElementById('a-users').textContent=allUsers.length;
+        toast(`User ${email} created successfully`,'success');
+      }else{
+        msgEl.innerHTML=`<div class="auth-msg ok">Account created! User needs to verify their email before logging in.</div>`;
+      }
+    }else if(data?.user){
+      await SB.from('profiles').upsert({id:data.user.id,email,full_name:name,role});
+      const newUser={id:data.user.id,email,full_name:name,role,created_at:new Date().toISOString(),last_sign_in_at:null};
+      allUsers.unshift(newUser);
+      await logEvent('register',`Admin created user: ${email}`,{email,name,role});
+      closeAddUserModal();
+      renderUsersTbl();
+      document.getElementById('a-users').textContent=allUsers.length;
+      toast(`User ${email} created successfully`,'success');
+    }
+  }catch(e){
+    msgEl.innerHTML=`<div class="auth-msg err">${e.message}</div>`;
+  }
+  btn.disabled=false;btn.textContent='Create User';
+}
+
+// ── Edit User ─────────────────────────────────────
+window._editTarget=null;
+
+function openEditUserModal(uid){
+  const u=allUsers.find(x=>x.id===uid);if(!u)return;
+  window._editTarget={...u};
+  document.getElementById('editUserSubtitle').textContent=`Editing: ${u.email}`;
+  document.getElementById('editUserName').value=u.full_name||'';
+  document.getElementById('editUserEmail').value=u.email||'';
+  document.getElementById('editUserPassword').value='';
+  document.getElementById('editUserRole').value=u.role||'user';
+  document.getElementById('editUserMsg').innerHTML='';
+  document.getElementById('editUserModal').classList.add('open');
+}
+function closeEditUserModal(){
+  document.getElementById('editUserModal').classList.remove('open');
+  window._editTarget=null;
+}
+
+async function submitEditUser(){
+  const t=window._editTarget;if(!t)return;
+  const name=document.getElementById('editUserName').value.trim();
+  const email=document.getElementById('editUserEmail').value.trim();
+  const password=document.getElementById('editUserPassword').value;
+  const role=document.getElementById('editUserRole').value;
+  const msgEl=document.getElementById('editUserMsg');
+
+  if(!email){msgEl.innerHTML=`<div class="auth-msg err">Email is required.</div>`;return;}
+  if(password&&password.length<8){msgEl.innerHTML=`<div class="auth-msg err">New password must be at least 8 characters.</div>`;return;}
+
+  const btn=document.getElementById('editUserBtn');
+  btn.disabled=true;btn.textContent='Saving...';
+  msgEl.innerHTML='';
+
+  try{
+    // Update profile (name + role)
+    const{error:profErr}=await SB.from('profiles').update({
+      full_name:name,
+      email:email,
+      role:role
+    }).eq('id',t.id);
+    if(profErr)throw new Error('Profile update failed: '+profErr.message);
+
+    // Update role via RPC if changed
+    if(role!==t.role){
+      await SB.rpc('update_user_role',{target_id:t.id,new_role:role});
+    }
+
+    // Update local state
+    const u=allUsers.find(x=>x.id===t.id);
+    if(u){u.full_name=name;u.email=email;u.role=role;}
+
+    await logEvent('role',`Admin updated user: ${t.email} → name:${name}, role:${role}`,{uid:t.id});
+
+    const changes=[];
+    if(name!==t.full_name)changes.push(`name: ${t.full_name||'—'} → ${name}`);
+    if(email!==t.email)changes.push(`email: ${t.email} → ${email}`);
+    if(role!==t.role)changes.push(`role: ${t.role} → ${role}`);
+    if(password)changes.push('password changed');
+
+    msgEl.innerHTML=`<div class="auth-msg ok" style="background:var(--green-bg);border:1px solid var(--green-border);color:var(--green);border-radius:8px;padding:9px 12px;font-size:12px;margin-bottom:10px;">
+      ✓ Updated: ${changes.length?changes.join(' · '):'No changes'}
+    </div>`;
+
+    renderUsersTbl();
+    document.getElementById('a-admins').textContent=allUsers.filter(u=>u.role==='admin').length;
+    setTimeout(()=>closeEditUserModal(),1500);
+    toast(`User ${email} updated`,'success');
+  }catch(e){
+    msgEl.innerHTML=`<div class="auth-msg err">${e.message}</div>`;
+  }
+  btn.disabled=false;btn.textContent='Save Changes';
 }
 
 // ── Export users CSV ──────────────────────────────
