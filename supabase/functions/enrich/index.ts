@@ -37,7 +37,10 @@ async function findLinkedInUrl(companyName: string, website: string, serperKey: 
       headers: { "Content-Type": "application/json", "X-API-KEY": serperKey },
       body: JSON.stringify({ q: query, num: 5 }),
     });
-    if (!res.ok) return "";
+    if (!res.ok) {
+      console.log("Serper LinkedIn search failed:", res.status, "— falling back to Groq");
+      return "";
+    }
     const data = await res.json();
     // Find first linkedin.com/company result
     for (const item of data?.organic || []) {
@@ -140,7 +143,10 @@ async function searchCompanyInfo(companyName: string, website: string, serperKey
       headers: { "Content-Type": "application/json", "X-API-KEY": serperKey },
       body: JSON.stringify({ q: query, num: 5 }),
     });
-    if (!res.ok) return "";
+    if (!res.ok) {
+      console.log("Serper company search failed:", res.status, "— falling back to Groq");
+      return "";
+    }
     const data = await res.json();
     const snippets: string[] = [];
     // Knowledge graph
@@ -323,22 +329,29 @@ serve(async (req: Request) => {
 
     if (serperKey) {
       console.log("Running web search for:", website);
-      const [liUrl, webCtx] = await Promise.all([
-        findLinkedInUrl(companyName, website, serperKey),
-        searchCompanyInfo(companyName, website, serperKey),
-      ]);
-      linkedInUrl = liUrl;
-      webSearchContext = webCtx;
-      console.log("LinkedIn URL found:", linkedInUrl);
-      console.log("Web context length:", webSearchContext.length);
+      try {
+        const [liUrl, webCtx] = await Promise.all([
+          findLinkedInUrl(companyName, website, serperKey),
+          searchCompanyInfo(companyName, website, serperKey),
+        ]);
+        linkedInUrl = liUrl;
+        webSearchContext = webCtx;
+        console.log("LinkedIn URL found:", linkedInUrl || "none");
+        console.log("Web context length:", webSearchContext.length);
 
-      // ── 6. Scrape LinkedIn if URL found ───────────────────
-      if (linkedInUrl) {
-        linkedInData = await scrapeLinkedIn(linkedInUrl);
-        console.log("LinkedIn data:", JSON.stringify(linkedInData));
+        // Scrape LinkedIn if URL found
+        if (linkedInUrl) {
+          linkedInData = await scrapeLinkedIn(linkedInUrl);
+          console.log("LinkedIn data:", JSON.stringify(linkedInData));
+        }
+      } catch (searchErr) {
+        // Serper quota exhausted or any other error — silently fall back to Groq-only
+        console.log("Web search failed (possibly quota exhausted) — using Groq knowledge only:", searchErr);
+        linkedInUrl = "";
+        webSearchContext = "";
       }
     } else {
-      console.log("No Serper key — skipping web search, using AI knowledge only");
+      console.log("No Serper key configured — using Groq knowledge only");
     }
 
     // ── 7. Build research context for AI ───────────────────
@@ -353,12 +366,13 @@ serve(async (req: Request) => {
     ].filter(Boolean).join("\n");
 
     // ── 8. Call Groq ────────────────────────────────────────
+    const searchWasUsed = !!(linkedInUrl || webSearchContext);
     const userMessage = `Research this company and return the complete 20-field JSON profile.
 
 Website: ${website}
 Company Name (extracted): ${companyName}
 
-${researchContext ? `=== REAL DATA FROM WEB RESEARCH ===\n${researchContext}\n\nUse the above real data to fill fields accurately. LinkedIn employee count is the most reliable source for company size.` : "No web research data available — use your training knowledge."}
+${researchContext ? `=== REAL DATA FROM WEB RESEARCH ===\n${researchContext}\n\nUse the above real data to fill fields accurately. LinkedIn employee count is the most reliable source for company size.` : "No web search data available — use your full training knowledge to fill all fields. Make confident inferences based on company type, domain TLD, and industry context. Do not return Unknown when inference is possible."}
 
 Important:
 - If LinkedIn URL was found above, use it exactly as provided
