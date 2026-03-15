@@ -1227,7 +1227,10 @@ async function callAI(website){
 // SINGLE ENRICH
 // ─────────────────────────────────────────────────
 async function enrichSingle(){
-  const w=document.getElementById('sWeb').value.trim();if(!w)return;
+  let w=document.getElementById('sWeb').value.trim();if(!w)return;
+  // Normalize: if user typed a company name without dot, keep as-is but warn AI
+  // If it looks like a domain (has a dot), clean it up
+  if(w.includes('.')){w=w.replace(/^https?:\/\//,'').replace(/^www\./,'').replace(/\/.*$/,'').toLowerCase();}
   const btn=document.getElementById('sBtn'),st=document.getElementById('sStat');
   btn.disabled=true;btn.innerHTML='<span class="spin">◌</span>';st.textContent='Researching '+w+'...';document.getElementById('sRes').innerHTML='';
   try{
@@ -1251,8 +1254,6 @@ function cardHtml(acc){
     ['Account Type By Size',acc.accountTypeBySize],
     ['Business Type',acc.businessType],
     ['Cloud Platform',acc.cloudPlatform],
-    ['Engineering & IT',acc.engineeringIT],
-    ['DevOps',acc.devOps],
     ['Industry',acc.industry],
     ['Sub-Industry',acc.subIndustry],
     ['Employee Count',acc.employeeCount],
@@ -1271,7 +1272,9 @@ function cardHtml(acc){
       <div style="margin-left:auto;display:flex;gap:5px;flex-wrap:wrap;">${badgeHtml(acc.accountType)}${badgeHtml(acc.businessType)}${badgeHtml(acc.accountTypeBySize)}</div>
     </div>
     ${acc.draInsights?`<div style="padding:10px 14px;background:var(--accent-glow);border-bottom:1px solid var(--border);font-size:12px;color:var(--text2);line-height:1.6;">${acc.draInsights}</div>`:''}
-    ${acc.engineeringIT?`<div style="padding:9px 14px;border-bottom:1px solid var(--border);"><span style="font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:0.07em;">Engineering & IT</span><div style="font-size:12px;color:var(--text2);margin-top:3px;line-height:1.5;">${acc.engineeringIT}</div></div>`:''}
+    ${acc.engineeringIT||acc.devOps?`<div style="padding:9px 14px;border-bottom:1px solid var(--border);">
+      ${acc.engineeringIT?`<div style="margin-bottom:6px;"><span style="font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:0.07em;">Engineering & IT</span><div style="font-size:12px;color:var(--text2);margin-top:3px;line-height:1.5;">${acc.engineeringIT}</div></div>`:''}
+      ${acc.devOps?`<div><span style="font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:0.07em;">DevOps</span><div style="font-size:12px;color:var(--text2);margin-top:3px;line-height:1.5;">${acc.devOps}</div></div>`:''}</div>`:''}
     <table style="width:100%;border-collapse:collapse;">${rows.map(([k,v])=>`<tr><td style="padding:8px 14px;font-size:11px;color:var(--text3);font-weight:600;width:140px;border-bottom:1px solid var(--border);">${k}</td><td style="padding:8px 14px;font-size:12px;border-bottom:1px solid var(--border);">${v||'—'}</td></tr>`).join('')}</table>
   </div>`;
 }

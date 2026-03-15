@@ -265,7 +265,7 @@ OUTPUT — all 20 keys required
 Return ONLY valid JSON:
 {
   "accountName": "Official company name",
-  "website": "MUST be exactly the domain as provided by user e.g. tripjack.com — never change it to the company name",
+  "website": "The company domain e.g. tripjack.com. If a domain was provided use it exactly. If only a company name was provided, find and return the correct domain.",
   "draInsights": "2-3 sentences: what company does, business model, key products/services, market position",
   "engineeringIT": "Tech stack AND team size combined. Format: '[Tech Stack] | Team Size: [number or range]'. Example: 'React, Node.js, Python, AWS | Team Size: 150-200 engineers'. Use LinkedIn engineering team data if available, else estimate from total headcount.",
   "cloudPlatform": "Cloud platform — single name or Multi-cloud (X, Y) pattern",
@@ -395,9 +395,12 @@ serve(async (req: Request) => {
 
     // ── 8. Call Groq ────────────────────────────────────────
     const searchWasUsed = !!(linkedInUrl || webSearchContext);
+    // Detect if input looks like a domain or a company name
+    const looksLikeDomain = website.includes('.');
     const userMessage = `Research this company and return the complete 20-field JSON profile.
 
-Website: ${website}
+${looksLikeDomain ? `Website: ${website}` : `Company Name: ${website}
+Note: User typed the company name directly. Find the website domain yourself and use it in the website field.`}
 Company Name (extracted): ${companyName}
 
 ${researchContext ? `=== REAL DATA FROM WEB RESEARCH ===\n${researchContext}\n\nUse the above real data to fill fields accurately. LinkedIn employee count is the most reliable source for company size.` : "No web search data available — use your full training knowledge to fill all fields. Make confident inferences based on company type, domain TLD, and industry context. Do not return Unknown when inference is possible."}
