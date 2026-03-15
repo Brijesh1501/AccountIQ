@@ -1623,22 +1623,26 @@ function openDeleteUserModal(uid, email, name){
 
 async function confirmDeleteUser(){
   const t=window._deleteTarget; if(!t) return;
-  // Delete all accounts first
-  await SB.rpc('delete_user_accounts',{target_id:t.uid});
-  // Delete profile
-  await SB.from('profiles').delete().eq('id',t.uid);
-  await logEvent('delete',`Admin deleted user: ${t.email}`,{uid:t.uid});
-  allUsers=allUsers.filter(u=>u.id!==t.uid);
-  allAdminAccounts=allAdminAccounts.filter(a=>a.user_id!==t.uid);
-  filteredAdminAccs=[...allAdminAccounts];
-  document.getElementById('deleteUserModal').classList.remove('open');
-  document.getElementById('deleteConfirmInput').value='';
-  window._deleteTarget=null;
-  renderUsersTbl(); renderAdminAccsTbl(); renderOverviewStats();
-  document.getElementById('a-users').textContent=allUsers.length;
-  document.getElementById('a-accs').textContent=allAdminAccounts.length;
-  document.getElementById('a-admins').textContent=allUsers.filter(u=>u.role==='admin').length;
-  toast(`User ${t.email} deleted permanently`,'success');
+  const btn=document.getElementById('confirmDeleteBtn');
+  btn.disabled=true;btn.textContent='Deleting...';
+  try{
+    await callAdminUsersAPI({action:'delete',userId:t.uid});
+    await logEvent('delete',`Admin deleted user: ${t.email}`,{uid:t.uid});
+    allUsers=allUsers.filter(u=>u.id!==t.uid);
+    allAdminAccounts=allAdminAccounts.filter(a=>a.user_id!==t.uid);
+    filteredAdminAccs=[...allAdminAccounts];
+    document.getElementById('deleteUserModal').classList.remove('open');
+    document.getElementById('deleteConfirmInput').value='';
+    window._deleteTarget=null;
+    renderUsersTbl(); renderAdminAccsTbl(); renderOverviewStats();
+    document.getElementById('a-users').textContent=allUsers.length;
+    document.getElementById('a-accs').textContent=allAdminAccounts.length;
+    document.getElementById('a-admins').textContent=allUsers.filter(u=>u.role==='admin').length;
+    toast(`User ${t.email} deleted permanently`,'success');
+  }catch(e){
+    toast('Delete failed: '+e.message,'error');
+    btn.disabled=false;btn.textContent='Delete Permanently';
+  }
 }
 
 // ── Bulk delete users ─────────────────────────────
@@ -1730,52 +1734,42 @@ function closeAddUserModal(){
   document.getElementById('addUserModal').classList.remove('open');
 }
 
+// ── Admin Users Edge Function caller ─────────────
+async function callAdminUsersAPI(payload){
+  const c=gc();
+  const{data:{session}}=await SB.auth.getSession();
+  if(!session) throw new Error('Session expired. Please sign in again.');
+  const url=c.u.replace(/\/$/,'')+'/functions/v1/admin-users';
+  const r=await fetch(url,{
+    method:'POST',
+    headers:{'Content-Type':'application/json','Authorization':'Bearer '+session.access_token,'apikey':c.k},
+    body:JSON.stringify(payload)
+  });
+  const result=await r.json();
+  if(!r.ok) throw new Error(result?.error||'Request failed (HTTP '+r.status+')');
+  if(result.error) throw new Error(result.error);
+  return result;
+}
+
 async function submitAddUser(){
   const name=document.getElementById('addUserName').value.trim();
   const email=document.getElementById('addUserEmail').value.trim();
   const password=document.getElementById('addUserPassword').value;
   const role=document.getElementById('addUserRole').value;
   const msgEl=document.getElementById('addUserMsg');
-
   if(!email||!password){msgEl.innerHTML=`<div class="auth-msg err">Email and password are required.</div>`;return;}
   if(password.length<8){msgEl.innerHTML=`<div class="auth-msg err">Password must be at least 8 characters.</div>`;return;}
-
   const btn=document.getElementById('addUserBtn');
   btn.disabled=true;btn.textContent='Creating...';
   msgEl.innerHTML='';
-
   try{
-    // Use Supabase admin signUp via service — we use the anon client but create profile after
-    const{data,error}=await SB.auth.admin?
-      SB.auth.admin.createUser({email,password,email_confirm:true,user_metadata:{full_name:name}}):
-      {data:null,error:{message:'Admin API not available. Use Supabase dashboard to create users directly.'}};
-
-    if(error){
-      // Fallback: try regular signUp and handle profile
-      const{data:sd,error:se}=await SB.auth.signUp({email,password,options:{data:{full_name:name}}});
-      if(se)throw new Error(se.message);
-      if(sd.user){
-        await SB.from('profiles').upsert({id:sd.user.id,email,full_name:name,role});
-        const newUser={id:sd.user.id,email,full_name:name,role,created_at:new Date().toISOString(),last_sign_in_at:null};
-        allUsers.unshift(newUser);
-        await logEvent('register',`Admin created user: ${email}`,{email,name,role});
-        closeAddUserModal();
-        renderUsersTbl();
-        document.getElementById('a-users').textContent=allUsers.length;
-        toast(`User ${email} created successfully`,'success');
-      }else{
-        msgEl.innerHTML=`<div class="auth-msg ok">Account created! User needs to verify their email before logging in.</div>`;
-      }
-    }else if(data?.user){
-      await SB.from('profiles').upsert({id:data.user.id,email,full_name:name,role});
-      const newUser={id:data.user.id,email,full_name:name,role,created_at:new Date().toISOString(),last_sign_in_at:null};
-      allUsers.unshift(newUser);
-      await logEvent('register',`Admin created user: ${email}`,{email,name,role});
-      closeAddUserModal();
-      renderUsersTbl();
-      document.getElementById('a-users').textContent=allUsers.length;
-      toast(`User ${email} created successfully`,'success');
-    }
+    const result=await callAdminUsersAPI({action:'create',email,password,fullName:name,role});
+    allUsers.unshift(result.user);
+    await logEvent('register',`Admin created user: ${email}`,{email,name,role});
+    closeAddUserModal();
+    renderUsersTbl();
+    document.getElementById('a-users').textContent=allUsers.length;
+    toast(`User ${email} created successfully`,'success');
   }catch(e){
     msgEl.innerHTML=`<div class="auth-msg err">${e.message}</div>`;
   }
@@ -1808,44 +1802,25 @@ async function submitEditUser(){
   const password=document.getElementById('editUserPassword').value;
   const role=document.getElementById('editUserRole').value;
   const msgEl=document.getElementById('editUserMsg');
-
   if(!email){msgEl.innerHTML=`<div class="auth-msg err">Email is required.</div>`;return;}
   if(password&&password.length<8){msgEl.innerHTML=`<div class="auth-msg err">New password must be at least 8 characters.</div>`;return;}
-
   const btn=document.getElementById('editUserBtn');
   btn.disabled=true;btn.textContent='Saving...';
   msgEl.innerHTML='';
-
   try{
-    // Update profile (name + role)
-    const{error:profErr}=await SB.from('profiles').update({
-      full_name:name,
-      email:email,
-      role:role
-    }).eq('id',t.id);
-    if(profErr)throw new Error('Profile update failed: '+profErr.message);
-
-    // Update role via RPC if changed
-    if(role!==t.role){
-      await SB.rpc('update_user_role',{target_id:t.id,new_role:role});
-    }
-
+    const payload={action:'update',userId:t.id,email,fullName:name,role};
+    if(password) payload.password=password;
+    await callAdminUsersAPI(payload);
     // Update local state
     const u=allUsers.find(x=>x.id===t.id);
     if(u){u.full_name=name;u.email=email;u.role=role;}
-
-    await logEvent('role',`Admin updated user: ${t.email} → name:${name}, role:${role}`,{uid:t.id});
-
+    await logEvent('role',`Admin updated user: ${t.email}`,{uid:t.id,name,role});
     const changes=[];
-    if(name!==t.full_name)changes.push(`name: ${t.full_name||'—'} → ${name}`);
-    if(email!==t.email)changes.push(`email: ${t.email} → ${email}`);
-    if(role!==t.role)changes.push(`role: ${t.role} → ${role}`);
+    if(name!==t.full_name)changes.push(`name → ${name}`);
+    if(email!==t.email)changes.push(`email → ${email}`);
+    if(role!==t.role)changes.push(`role → ${role}`);
     if(password)changes.push('password changed');
-
-    msgEl.innerHTML=`<div class="auth-msg ok" style="background:var(--green-bg);border:1px solid var(--green-border);color:var(--green);border-radius:8px;padding:9px 12px;font-size:12px;margin-bottom:10px;">
-      ✓ Updated: ${changes.length?changes.join(' · '):'No changes'}
-    </div>`;
-
+    msgEl.innerHTML=`<div class="auth-msg ok" style="background:var(--green-bg);border:1px solid var(--green-border);color:var(--green);border-radius:8px;padding:9px 12px;font-size:12px;margin-bottom:10px;">✓ Updated: ${changes.length?changes.join(' · '):'No changes'}</div>`;
     renderUsersTbl();
     document.getElementById('a-admins').textContent=allUsers.filter(u=>u.role==='admin').length;
     setTimeout(()=>closeEditUserModal(),1500);
