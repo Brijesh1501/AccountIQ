@@ -41,6 +41,15 @@ PE/VC Firms: Invests capital only. Does not sell products or services. PE = matu
 ══ BUSINESS TYPE ══
 B2B: sells to businesses | B2C: sells to consumers | B2B and B2C: serves both
 
+══ CLOUD PLATFORM CLASSIFICATION ══
+Identify the primary cloud/hosting infrastructure. Use these values:
+- Hyperscalers: AWS | Azure (Microsoft Azure) | GCP (Google Cloud)
+- Other Cloud: Oracle Cloud | IBM Cloud | Alibaba Cloud | DigitalOcean | Linode | Vultr
+- Edge/Hosting: Cloudflare | Vercel | Netlify | Heroku | Render
+- On-premise: On-premise (if company runs own data centers)
+- Multi-cloud: Multi-cloud (if uses 2+ major cloud providers)
+- Unknown: if cannot be determined
+
 ══ ACCOUNT SIZE ══
 StartUp (<50) | Small (50-200) | Medium (200-500) | Large (500-1000) | X-Large (1000-5000) | XX-Large (5000+)
 
@@ -70,13 +79,14 @@ Internet (Digital Platforms) → Internet (Digital Platforms)
 North America | EMEA | APAC | LATAM | India
 
 ══ REQUIRED JSON OUTPUT ══
-Return ONLY a JSON object with exactly these 18 keys:
+Return ONLY a JSON object with exactly these 19 keys:
 {
   "accountName": "Official company name",
   "website": "domain provided",
   "draInsights": "2-3 sentence summary of what company does, business model, key products, market position",
-  "engineeringIT": "Known tech stack, languages, frameworks, cloud infra. Write Unknown if not determinable.",
-  "devOps": "Known DevOps tools and practices. Write Unknown if not determinable.",
+  "engineeringIT": "Known tech stack, programming languages, frameworks (e.g. Python, React, Node.js, Java). Write Unknown if not determinable.",
+  "cloudPlatform": "Primary cloud/hosting platform used by the company. Examples: AWS, Azure, GCP, Oracle Cloud, IBM Cloud, Alibaba Cloud, DigitalOcean, Heroku, Vercel, Netlify, Cloudflare, On-premise, Multi-cloud. Write Unknown if not determinable.",
+  "devOps": "Known DevOps tools and CI/CD practices (e.g. GitHub Actions, Jenkins, Docker, Kubernetes, Terraform). Write Unknown if not determinable.",
   "employeeCount": "Estimated count or range e.g. 5000 or 1000-5000",
   "accountTypeBySize": "Exactly one of: StartUp (<50) | Small (50-200) | Medium (200-500) | Large (500-1000) | X-Large (1000-5000) | XX-Large (5000+)",
   "accountType": "Exactly one of: Enterprise | ISV | Consumer Portal | Agency/Service Company | PE/VC Firms",
