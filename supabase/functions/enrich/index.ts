@@ -1,9 +1,9 @@
-// AccountIQ — Supabase Edge Function (Google Gemini — FREE)
+// AccountIQ — Supabase Edge Function (Groq — FREE, worldwide)
 // File: supabase/functions/enrich/index.ts
 //
 // Deploy:  supabase functions deploy enrich --no-verify-jwt
-// Secret:  supabase secrets set GEMINI_API_KEY=AIzaSy...
-// Get key: https://aistudio.google.com/apikey  (free, no credit card)
+// Secret:  supabase secrets set GROQ_API_KEY=gsk_...
+// Get key: https://console.groq.com  (free, no credit card)
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -29,7 +29,7 @@ function checkRateLimit(userId: string): { allowed: boolean; remaining: number }
   return { allowed: true, remaining: RATE_LIMIT - entry.count };
 }
 
-const AI_PROMPT = `You are an expert account research AI for a B2B CRM platform. Analyse the given company website and return ONLY a valid JSON object — no markdown, no explanation, no preamble.
+const SYSTEM_PROMPT = `You are an expert account research AI for a B2B CRM platform. Analyse the given company website and return ONLY a valid JSON object — no markdown, no explanation, no preamble.
 
 ══ ACCOUNT TYPE DEFINITIONS ══
 Enterprise: Large org (1000+ employees) OR smaller org (~45+ employees) with multiple business lines. ROI mainly from OFFLINE channels. Sells only own products via website = Enterprise not Consumer Portal. Examples: tejasnetworks.com, wforwoman.com, wildcraft.com
@@ -70,7 +70,7 @@ Internet (Digital Platforms) → Internet (Digital Platforms)
 North America | EMEA | APAC | LATAM | India
 
 ══ REQUIRED JSON OUTPUT ══
-Return ONLY this JSON object with all 18 keys:
+Return ONLY a JSON object with exactly these 18 keys:
 {
   "accountName": "Official company name",
   "website": "domain provided",
@@ -96,7 +96,6 @@ serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: CORS });
   }
-
   if (req.method !== "POST") {
     return new Response(JSON.stringify({ error: "Method not allowed" }), {
       status: 405, headers: { ...CORS, "Content-Type": "application/json" },
@@ -129,7 +128,7 @@ serve(async (req: Request) => {
     const { allowed, remaining } = checkRateLimit(user.id);
     if (!allowed) {
       return new Response(JSON.stringify({ error: "Rate limit exceeded. Max 100 enrichments per hour." }), {
-        status: 429, headers: { ...CORS, "Content-Type": "application/json", "X-RateLimit-Remaining": "0" },
+        status: 429, headers: { ...CORS, "Content-Type": "application/json" },
       });
     }
 
@@ -142,44 +141,45 @@ serve(async (req: Request) => {
       });
     }
 
-    // ── 4. Call Google Gemini API (FREE) ────────────────────
-    const geminiKey = Deno.env.get("GEMINI_API_KEY");
-    if (!geminiKey) {
-      return new Response(JSON.stringify({ error: "Gemini API key not configured on server. Contact your admin." }), {
+    // ── 4. Call Groq API (FREE) ─────────────────────────────
+    const groqKey = Deno.env.get("GROQ_API_KEY");
+    if (!groqKey) {
+      return new Response(JSON.stringify({ error: "Groq API key not configured. Contact your admin." }), {
         status: 500, headers: { ...CORS, "Content-Type": "application/json" },
       });
     }
 
-    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`;
-
-    const geminiRes = await fetch(geminiUrl, {
+    const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${groqKey}`,
+      },
       body: JSON.stringify({
-        contents: [{
-          parts: [{ text: `${AI_PROMPT}\n\nResearch this company and return all 18 fields as JSON.\nWebsite: ${website}` }]
-        }],
-        generationConfig: {
-          temperature: 0.1,
-          maxOutputTokens: 1024,
-          responseMimeType: "application/json"
-        }
+        model: "llama-3.3-70b-versatile",
+        temperature: 0.1,
+        max_tokens: 1024,
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: SYSTEM_PROMPT },
+          { role: "user", content: `Research this company and return all 18 fields as JSON.\nWebsite: ${website}` }
+        ],
       }),
     });
 
-    if (!geminiRes.ok) {
-      const errText = await geminiRes.text();
-      console.error("Gemini error:", errText);
+    if (!groqRes.ok) {
+      const errText = await groqRes.text();
+      console.error("Groq error:", errText);
       return new Response(JSON.stringify({ error: "AI service error. Please try again." }), {
         status: 502, headers: { ...CORS, "Content-Type": "application/json" },
       });
     }
 
-    const geminiData = await geminiRes.json();
-    let rawText = geminiData?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    const groqData = await groqRes.json();
+    let rawText = groqData?.choices?.[0]?.message?.content || "";
 
     if (!rawText) {
-      console.error("Empty Gemini response:", JSON.stringify(geminiData));
+      console.error("Empty Groq response:", JSON.stringify(groqData));
       return new Response(JSON.stringify({ error: "Empty AI response. Please try again." }), {
         status: 502, headers: { ...CORS, "Content-Type": "application/json" },
       });
