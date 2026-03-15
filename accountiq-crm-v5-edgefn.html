@@ -776,7 +776,7 @@ create table public.accounts (
   dra_insights text, engineering_it text, devops text,
   employee_count text, account_type_by_size text,
   cloud_platform text, account_type text,
-  account_linkedin text, business_type text,
+  account_type_reason text, account_linkedin text, business_type text,
   industry text, sub_industry text,
   revenue_usd text, billing_city text,
   billing_state text, billing_country text,
@@ -823,7 +823,6 @@ const SUPABASE_ANON_KEY = localStorage.getItem('iq_k') || ''; // your anon/publi
 // Edge Function URL — set this after deploying your Supabase Edge Function
 const EDGE_FUNCTION_URL = (SUPABASE_URL ? SUPABASE_URL + '/functions/v1/enrich-account' : '');
 
-//const gc=()=>({u:SUPABASE_URL||localStorage.getItem('iq_u')||'',k:SUPABASE_ANON_KEY||localStorage.getItem('iq_k')||''});
 const gc=()=>({
   u: 'https://jzpngsntyteveejvphbz.supabase.co',
   k: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imp6cG5nc250eXRldmVlanZwaGJ6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM1NTA0MDUsImV4cCI6MjA4OTEyNjQwNX0.KculkXh7LRxd2zlxtjyzqkiwUEZyVU5fkIjeJ_wDM4U'
@@ -990,6 +989,7 @@ async function saveAccount(acc){
     account_type_by_size:acc.accountTypeBySize,
     cloud_platform:acc.cloudPlatform,
     account_type:acc.accountType,
+    account_type_reason:acc.accountTypeReason,
     account_linkedin:acc.accountLinkedIn,
     business_type:acc.businessType,
     industry:acc.industry,
@@ -1016,6 +1016,7 @@ async function loadAccounts(){
     draInsights:r.dra_insights, engineeringIT:r.engineering_it, devOps:r.devops,
     employeeCount:r.employee_count, accountTypeBySize:r.account_type_by_size,
     cloudPlatform:r.cloud_platform, accountType:r.account_type,
+    accountTypeReason:r.account_type_reason,
     accountLinkedIn:r.account_linkedin, businessType:r.business_type,
     industry:r.industry, subIndustry:r.sub_industry,
     revenueUSD:r.revenue_usd, billingCity:r.billing_city,
@@ -1101,6 +1102,7 @@ function cardHtml(acc){
     ['Account Name',acc.accountName],
     ['Website',acc.website],
     ['Account Type',acc.accountType],
+    ['Account Type Reason',acc.accountTypeReason],
     ['Account Type By Size',acc.accountTypeBySize],
     ['Business Type',acc.businessType],
     ['Cloud Platform',acc.cloudPlatform],
@@ -1246,7 +1248,7 @@ function openDrawer(id){
     <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:14px;">${badgeHtml(acc.accountType)}${badgeHtml(acc.businessType)}${badgeHtml(acc.accountTypeBySize)}${badgeHtml(acc.cloudPlatform)}</div>
     ${acc.draInsights?`<div style="background:var(--accent-glow);border:1px solid rgba(79,142,247,0.15);border-radius:8px;padding:10px 12px;font-size:12px;color:var(--text2);line-height:1.6;margin-bottom:14px;">${acc.draInsights}</div>`:''}
     <div class="dsec">Classification</div>
-    ${[['Account Type',acc.accountType],['Account Type By Size',acc.accountTypeBySize],['Business Type',acc.businessType],['Industry',acc.industry],['Sub-Industry',acc.subIndustry]].map(([k,v])=>`<div class="drow"><div class="dk">${k}</div><div class="dv">${v||'—'}</div></div>`).join('')}
+    ${[['Account Type',acc.accountType],['Account Type Reason',acc.accountTypeReason],['Account Type By Size',acc.accountTypeBySize],['Business Type',acc.businessType],['Industry',acc.industry],['Sub-Industry',acc.subIndustry]].map(([k,v])=>`<div class="drow"><div class="dk">${k}</div><div class="dv">${v||'—'}</div></div>`).join('')}
     <div class="dsec">Technology</div>
     ${[['Cloud Platform',acc.cloudPlatform],['Engineering & IT',acc.engineeringIT],['DevOps',acc.devOps]].map(([k,v])=>`<div class="drow"><div class="dk">${k}</div><div class="dv" style="font-size:11px;line-height:1.5;">${v||'—'}</div></div>`).join('')}
     <div class="dsec">Company Details</div>
@@ -1263,8 +1265,8 @@ function openDrawer(id){
 // EXPORT
 // ─────────────────────────────────────────────────
 function toCSV(rows){
-  const k=['accountName','website','draInsights','engineeringIT','devOps','employeeCount','accountTypeBySize','cloudPlatform','accountType','accountLinkedIn','businessType','industry','subIndustry','revenueUSD','billingCity','billingState','billingCountry','region','timeZone'];
-  const l=['Account Name','Website','DRA Insights','Engineering & IT','DevOps','Employee Count','Account Type By Size','Cloud Platform','Account Type','Account LinkedIn','Business Type','Industry','Sub-Industry','Revenue (USD M)','Billing City','Billing State','Billing Country','Region','Time Zone'];
+  const k=['accountName','website','draInsights','engineeringIT','cloudPlatform','devOps','employeeCount','accountTypeBySize','accountType','accountTypeReason','accountLinkedIn','businessType','industry','subIndustry','revenueUSD','billingCity','billingState','billingCountry','region','timeZone'];
+  const l=['Account Name','Website','DRA Insights','Engineering & IT','Cloud Platform','DevOps','Employee Count','Account Type By Size','Account Type','Account Type Reason','Account LinkedIn','Business Type','Industry','Sub-Industry','Revenue (USD M)','Billing City','Billing State','Billing Country','Region','Time Zone'];
   return[l.join(','),...rows.map(r=>k.map(x=>'"'+(r[x]||'')+'"').join(','))].join('\n');
 }
 function dlCSV(content,fname){const a=document.createElement('a');a.href='data:text/csv;charset=utf-8,'+encodeURIComponent(content);a.download=fname;a.click();}
@@ -1353,7 +1355,7 @@ async function adminDeleteUserAccounts(uid,email){
   toast('All accounts deleted for '+email,'success');
 }
 function exportAdminCSV(){
-  const k=['account_name','website','dra_insights','engineering_it','devops','employee_count','account_type_by_size','cloud_platform','account_type','account_linkedin','business_type','industry','sub_industry','revenue_usd','billing_city','billing_state','billing_country','region','time_zone'],l=['Account Name','Website','DRA Insights','Engineering & IT','DevOps','Employee Count','Account Type By Size','Cloud Platform','Account Type','Account LinkedIn','Business Type','Industry','Sub-Industry','Revenue (USD M)','Billing City','Billing State','Billing Country','Region','Time Zone'];
+  const k=['account_name','website','dra_insights','engineering_it','cloud_platform','devops','employee_count','account_type_by_size','account_type','account_type_reason','account_linkedin','business_type','industry','sub_industry','revenue_usd','billing_city','billing_state','billing_country','region','time_zone'],l=['Account Name','Website','DRA Insights','Engineering & IT','DevOps','Employee Count','Account Type By Size','Cloud Platform','Account Type','Account LinkedIn','Business Type','Industry','Sub-Industry','Revenue (USD M)','Billing City','Billing State','Billing Country','Region','Time Zone'];
   const content=[l.join(','),...allAdminAccounts.map(r=>k.map(x=>'"'+(r[x]||'')+'"').join(','))].join('\n');
   dlCSV(content,'all_accounts_admin.csv');toast('Exported '+allAdminAccounts.length+' accounts','success');
 }

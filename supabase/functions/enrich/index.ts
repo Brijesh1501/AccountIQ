@@ -77,7 +77,7 @@ Internet (Digital Platforms) → Internet (Digital Platforms)
 North America | EMEA | APAC | LATAM | India
 
 ══ REQUIRED JSON OUTPUT ══
-Return ONLY a JSON object with exactly these 19 keys:
+Return ONLY a JSON object with exactly these 20 keys:
 {
   "accountName": "Official company name",
   "website": "domain provided",
@@ -88,6 +88,7 @@ Return ONLY a JSON object with exactly these 19 keys:
   "employeeCount": "Estimated count or range e.g. 5000 or 1000-5000",
   "accountTypeBySize": "Exactly one of: StartUp (<50) | Small (50-200) | Medium (200-500) | Large (500-1000) | X-Large (1000-5000) | XX-Large (5000+)",
   "accountType": "Exactly one of: Enterprise | ISV | Consumer Portal | Agency/Service Company | PE/VC Firms",
+  "accountTypeReason": "1-2 sentence explanation of WHY this account type was chosen. Mention specific evidence: product/platform names for ISV, marketplace nature for Consumer Portal, offline revenue channels for Enterprise, specific IT services for Agency, investment portfolio for PE/VC. Examples: ISV → 'Owns Salesforce CRM platform, generates revenue through SaaS subscriptions, independent company.' | Enterprise → 'Large manufacturing org with 5000+ employees, revenue driven through physical retail and distributor network.' | Consumer Portal → 'Operates as online marketplace connecting buyers and sellers, revenue from transaction commissions and ads.' | Agency → 'Provides IT consulting and application development services, no proprietary software product.' | PE/VC → 'Invests capital in early-stage fintech startups, takes minority stakes, does not sell products or services.'",
   "accountLinkedIn": "Full LinkedIn company URL e.g. https://www.linkedin.com/company/stripe or empty string",
   "businessType": "Exactly one of: B2B | B2C | B2B and B2C",
   "industry": "Exactly one industry from taxonomy above",
