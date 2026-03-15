@@ -131,19 +131,18 @@ async function scrapeLinkedIn(linkedinUrl: string): Promise<LinkedInData> {
 
     // Extract Engineering team size from LinkedIn
     // LinkedIn sometimes shows "Engineering: 120 employees" or "Software Engineering · 500+"
-    const engMatch = html.match(/[Ee]ngineering[^<
-]*?(\d[\d,]+)\s*(?:employees?|members?)/i) ||
-                     html.match(/Software\s*Engineering[^<
+    const engMatch = html.match(/[Ee]ngineering[^<]{0,60}?(\d[\d,]+)\s*(?:employees?|members?)/i) ||
+                     html.match(/Software Engineering[^<]{0,40}?(\d[\d,]+)/i) ||
+                     html.match(/[Tt]echnology[^<]{0,60}?(\d[\d,]+)\s*(?:employees?|members?)/i);
 ]*?(\d[\d,]+)/i) ||
                      html.match(/[Tt]echnology[^<
 ]*?(\d[\d,]+)\s*(?:employees?|members?)/i);
     const engineeringTeamSize = engMatch ? engMatch[1].replace(/,/g,"") : "";
 
     // Extract DevOps / Infrastructure team size
-    const devopsMatch = html.match(/[Dd]ev[Oo]ps[^<
-]*?(\d[\d,]+)\s*(?:employees?|members?)/i) ||
-                        html.match(/[Ii]nfrastructure[^<
-]*?(\d[\d,]+)\s*(?:employees?|members?)/i) ||
+    const devopsMatch = html.match(/DevOps[^<]{0,60}?(\d[\d,]+)\s*(?:employees?|members?)/i) ||
+                        html.match(/Infrastructure[^<]{0,60}?(\d[\d,]+)\s*(?:employees?|members?)/i) ||
+                        html.match(/Platform Engineering[^<]{0,40}?(\d[\d,]+)/i);
                         html.match(/[Cc]loud[^<
 ]*?(\d[\d,]+)\s*(?:employees?|members?)/i) ||
                         html.match(/[Pp]latform\s*[Ee]ngineering[^<
