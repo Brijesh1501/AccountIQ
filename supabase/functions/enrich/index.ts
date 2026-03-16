@@ -42,16 +42,13 @@ async function findLinkedInUrl(companyName: string, website: string, serperKey: 
       return "";
     }
     const data = await res.json();
-    // Find first linkedin.com/company result
     for (const item of data?.organic || []) {
       const link: string = item.link || "";
       if (link.includes("linkedin.com/company/")) {
-        // Clean URL — remove trailing slashes and query params
         const match = link.match(/(https:\/\/[a-z]+\.linkedin\.com\/company\/[a-zA-Z0-9_-]+)/);
         if (match) return match[1];
       }
     }
-    // Also check knowledge graph
     const kg = data?.knowledgeGraph;
     if (kg?.website) {
       const kgLink = kg.website;
@@ -93,42 +90,34 @@ async function scrapeLinkedIn(linkedinUrl: string): Promise<LinkedInData> {
 
     const html = await res.text();
 
-    // Employee range e.g. "1,001-5,000 employees"
     const empRangeMatch = html.match(/(\d[\d,]*[-]\d[\d,]*)\s*employees/i) ||
                           html.match(/"staffCount"\s*:\s*(\d+)/i) ||
                           html.match(/(\d[\d,]+)\s*employees/i);
     const employeeRange = empRangeMatch ? empRangeMatch[1].replace(/,/g, "") : "";
 
-    // Exact staff count from structured data
     const staffMatch = html.match(/"numberOfEmployees"[^}]*"value"\s*:\s*(\d+)/) ||
                        html.match(/"staffCount"\s*:\s*(\d+)/);
     const employeeCount = staffMatch ? staffMatch[1] : "";
 
-    // HQ location from structured data
     const hqMatch = html.match(/"addressLocality"\s*:\s*"([^"]+)"/) ||
                     html.match(/"addressCountry"\s*:\s*"([^"]+)"/);
     const hqLocation = hqMatch ? hqMatch[1].trim() : "";
 
-    // Founded year
     const foundedMatch = html.match(/[Ff]ounded\s*[:\s]*(\d{4})/) ||
                          html.match(/"foundingDate"\s*:\s*"(\d{4})"/);
     const founded = foundedMatch ? foundedMatch[1] : "";
 
-    // About/description from meta tag
     const aboutMatch = html.match(/<meta\s+name="description"\s+content="([^"]{50,500})"/i);
     const about = aboutMatch ? aboutMatch[1].trim() : "";
 
-    // Company type
     const typeMatch = html.match(/[Cc]ompany [Tt]ype[^:]{0,20}:\s*([^<]{1,50})/);
     const companyType = typeMatch ? typeMatch[1].trim() : "";
 
-    // Engineering team size — look for patterns like "Engineering · 120" or "150 in Engineering"
     const engMatch = html.match(/Engineering[^<]{0,50}(\d[\d,]+)\s*(?:employees?|members?)/i) ||
                      html.match(/(\d[\d,]+)\s*(?:employees?|members?)[^<]{0,30}Engineering/i) ||
                      html.match(/"Engineering"\s*[^}]{0,100}"memberCount"\s*:\s*(\d+)/i);
     const engineeringTeamSize = engMatch ? engMatch[1].replace(/,/g, "") : "";
 
-    // DevOps team size
     const devopsMatch = html.match(/DevOps[^<]{0,50}(\d[\d,]+)\s*(?:employees?|members?)/i) ||
                         html.match(/Infrastructure[^<]{0,50}(\d[\d,]+)\s*(?:employees?|members?)/i) ||
                         html.match(/"DevOps"\s*[^}]{0,100}"memberCount"\s*:\s*(\d+)/i);
@@ -156,7 +145,6 @@ async function searchCompanyInfo(companyName: string, website: string, serperKey
     }
     const data = await res.json();
     const snippets: string[] = [];
-    // Knowledge graph
     const kg = data?.knowledgeGraph;
     if (kg?.description) snippets.push("About: " + kg.description);
     if (kg?.attributes) {
@@ -164,11 +152,9 @@ async function searchCompanyInfo(companyName: string, website: string, serperKey
         snippets.push(`${k}: ${v}`);
       }
     }
-    // Organic snippets
     for (const item of (data?.organic || []).slice(0, 4)) {
       if (item.snippet) snippets.push(item.snippet);
     }
-    // Answer box
     if (data?.answerBox?.answer) snippets.push(data.answerBox.answer);
     if (data?.answerBox?.snippet) snippets.push(data.answerBox.snippet);
     return snippets.join("\n").slice(0, 2000);
@@ -178,110 +164,247 @@ async function searchCompanyInfo(companyName: string, website: string, serperKey
   }
 }
 
-const SYSTEM_PROMPT = `You are an expert B2B account research analyst. Given a company website and research data, return a comprehensive JSON profile. Use the provided real data (LinkedIn, web search) — only fall back to inference when data is missing.
+// ═══════════════════════════════════════════════════════════════════
+// SYSTEM PROMPT — Built from AccountIQ Knowledge Base v2
+// ═══════════════════════════════════════════════════════════════════
+const SYSTEM_PROMPT = `You are an expert B2B account research analyst trained on a specific internal knowledge base. You must follow ALL classification rules below exactly. Use real LinkedIn/web data when provided. Fall back to confident inference when data is missing — never return "Unknown" if inference is possible.
 
-════════════════════════════════════════════
-ACCOUNT TYPE — Use exactly ONE
-════════════════════════════════════════════
-ENTERPRISE: 1000+ employees OR smaller org (~45+) with multiple business lines. ROI mainly from OFFLINE channels (stores, distributors, direct sales). Sells own products via website = Enterprise (not Consumer Portal). Examples: tejasnetworks.com, wforwoman.com, wildcraft.com
-ISV: Owns its own software product/platform. Revenue via subscriptions/licensing. INDEPENDENT (not acquired). Core = software product NOT services. Examples: Freshworks, Zoho, Postman
-CONSUMER PORTAL: Marketplace connecting buyers and sellers. Revenue from transactions/commissions/ads. If only sells own products → Enterprise. Examples: Amazon, MakeMyTrip, TripJack (OTA marketplace)
-AGENCY/SERVICE COMPANY: Provides IT SERVICES only (consulting, app dev, web dev). No proprietary software. Non-IT service → Enterprise.
-PE/VC FIRMS: Invests capital only. No products/services.
+════════════════════════════════════════════════════════════
+ACCOUNT TYPE — Apply EXACTLY ONE using this decision tree
+════════════════════════════════════════════════════════════
 
-════════════════════════════════════════════
-BUSINESS TYPE
-════════════════════════════════════════════
-B2B | B2C | B2B and B2C
+STEP 1 — Is it a PE/VC Firm?
+→ Invests capital in businesses rather than selling products/services to end customers
+→ Private Equity (PE): invests in mature/established companies, often acquires majority/controlling stakes, focuses on long-term value creation
+→ Venture Capital (VC): invests in early-stage or growth-stage startups, takes minority ownership stakes, focuses on innovation and scalability
+→ If YES → Account Type = PE/VC Firms. STOP.
 
-════════════════════════════════════════════
-ACCOUNT SIZE
-════════════════════════════════════════════
-StartUp (<50) | Small (50-200) | Medium (200-500) | Large (500-1000) | X-Large (1000-5000) | XX-Large (5000+)
-Use LinkedIn employee count if provided — it is the most accurate signal.
+STEP 2 — Is it an Agency/Service Company?
+→ PRIMARY offering is IT services: IT consulting, app development, website development, digital transformation services
+→ Does NOT own a proprietary software product as its core business
+→ CRITICAL: Any non-IT service organization (e.g., accounting firm, law firm, marketing agency) → classify as Enterprise, NOT Agency/Service Company
+→ If YES → Account Type = Agency/Service Company. STOP.
 
-════════════════════════════════════════════
-INDUSTRIES & SUB-INDUSTRIES
-════════════════════════════════════════════
-Media & Entertainment → Broadcasters | Studios & Content Owners | OTT Platforms | Content Syndicators & Distributors | Publishing | General Entertainment Content | News | Gaming | Radio & Music | Cookery Media
-Financial Services → Retail & Commercial Banking | Investment Management | Insurance | Wealth Management | Payments | NBFC / Lending | Accounting | Others (Fintech & Capital Markets)
-Healthcare & Life Sciences → Pharmaceuticals | Healthcare Providers | Health Wellness & Fitness | Medical Devices
-Travel & Hospitality → Air Travel | Aerospace | Hotels | OTA (Online Travel Agencies)
-Business Software / Internet (SaaS) → AdTech & MarTech | ERP & Procurement Platforms | AI Platforms & Chatbots | HRMS & Workforce Management | Data Management & Analytics | Cybersecurity Platforms | Other B2B SaaS
+STEP 3 — Is it an ISV (Independent Software Vendor)?
+→ Owns and develops its own software product or platform
+→ Provides software to businesses or individual users via subscriptions, licensing, or trial-to-paid models
+→ Core business is the SOFTWARE PRODUCT itself, not services
+→ MUST be independent: if acquired by another organization → NOT an ISV
+→ Revenue model: SaaS subscriptions, software licenses, usage-based billing
+→ Examples: Freshworks, Zoho, Postman — own products, independent
+→ If YES → Account Type = ISV. STOP.
+
+STEP 4 — Is it a Consumer Portal?
+→ ROI primarily dependent on online platforms, NOT offline stores/distributors
+→ Operates as a marketplace: connects buyers and sellers
+→ Revenue from online transactions, commissions, advertisements, or platform usage fees
+→ CRITICAL DISTINCTION: If an organization sells ONLY ITS OWN products via its own website/app → NOT a Consumer Portal → classify as Enterprise
+→ Example of what is NOT a Consumer Portal: wildcraft.com (sells own products)
+→ Examples of Consumer Portals: Amazon (marketplace), MakeMyTrip (OTA marketplace), TripJack (OTA marketplace)
+→ If YES → Account Type = Consumer Portal. STOP.
+
+STEP 5 — Default to Enterprise:
+→ Large employee size (generally 1000+ employees)
+→ OR smaller organization (~45+ employees) WITH multiple business lines and sub-businesses
+→ Can be technology or non-technology based
+→ Operates across multiple domains, sub-businesses, or business lines
+→ ROI/profitability mainly driven by OFFLINE channels: physical stores, distributors, direct sales
+→ Organizations selling their OWN products via website/app → Enterprise (not Consumer Portal)
+→ Examples: tejasnetworks.com, wforwoman.com, wildcraft.com
+→ Account Type = Enterprise.
+
+════════════════════════════════════════════════════════════
+BUSINESS TYPE — Apply exactly one
+════════════════════════════════════════════════════════════
+B2B: Sells to other businesses/organizations. Characteristics: larger deal sizes, longer sales cycles, relationship-driven sales, customized solutions. Common in: enterprise software, consulting, industrial manufacturing, logistics, IT services. Revenue models: contracts, SaaS subscriptions, licensing, consulting fees.
+
+B2C: Sells directly to individual consumers. Characteristics: large number of customers, shorter purchase decisions, strong focus on marketing/branding. Common in: retail, e-commerce, food & beverage, entertainment, travel. Revenue models: product sales, subscriptions, advertising, transaction fees.
+
+B2B and B2C: Serves both businesses and individual consumers (e.g., a cloud platform that sells to enterprises AND has individual developer plans).
+
+════════════════════════════════════════════════════════════
+ACCOUNT SIZE — Based on employee count
+════════════════════════════════════════════════════════════
+StartUp: fewer than 50 employees
+Small: 50–200 employees
+Medium: 200–500 employees
+Large: 500–1,000 employees
+X-Large: 1,000–5,000 employees
+XX-Large: 5,000+ employees
+
+PRIORITY: Use LinkedIn employee count/range if provided — it is the most reliable signal.
+
+════════════════════════════════════════════════════════════
+INDUSTRIES & SUB-INDUSTRIES — Use exact taxonomy
+════════════════════════════════════════════════════════════
+Media & Entertainment
+  → Broadcasters | Studios & Content Owners | OTT Platforms | Content Syndicators & Distributors | Publishing | General Entertainment Content | News | Gaming | Radio & Music | Cookery Media
+
+Financial Services
+  → Retail & Commercial Banking | Investment Management | Insurance | Wealth Management | Payments | NBFC/Lending | Accounting | Others (Fintech & Capital Markets)
+
+Healthcare & Life Sciences
+  → Pharmaceuticals | Healthcare Providers | Health, Wellness & Fitness | Medical Devices
+
+Travel & Hospitality
+  → Air Travel | Aerospace | Hotels | OTA (Online Travel Agencies)
+
+Business Software / Internet (SaaS)
+  → AdTech & MarTech | ERP & Procurement Platforms | AI Platforms & Chatbots | HRMS & Workforce Management | Data Management & Analytics | Cybersecurity Platforms | Inventory Management | Facility Management | CMS | RegTech | Legal Services Platforms | Other B2B SaaS
+
 Sports → Leagues | Clubs & Teams | Sports Federations
+
 Wagering → Gambling Facilities & Casinos | Operators | iGaming | Lotteries | Platform Providers
+
 Retail → E-Commerce
-Agriculture Resources & Utilities → Oil & Energy | Mining | Power & Utilities | Agriculture & AgriTech
-Business Services → IT Services & Consulting | BPM / BPO Companies | Marketing & Advertising | Tax Audit & Legal Services | Translation & Localization
-Government & Public Sector → Government & Public Sector | Telecom → Telecom | Industrial & Manufacturing → Industrial & Manufacturing
-Automobile → Automobile | Food & Beverage → Food & Beverage | FMCG & CPG → FMCG & CPG | Real Estate → Real Estate
-PE / VC Firms → PE / VC Firms | Animation & Gaming → Animation & Gaming | Internet (Digital Platforms) → Internet (Digital Platforms)
 
-════════════════════════════════════════════
+Agriculture, Resources & Utilities → Oil & Energy | Mining | Power & Utilities | Agriculture & AgriTech
+
+Business Services → IT Services & Consulting | BPM/BPO Companies | Marketing & Advertising | Tax, Audit & Legal Services | Translation & Localization
+
+Government & Public Sector → Government & Public Sector
+Telecom → Telecom
+Industrial & Manufacturing → Industrial & Manufacturing
+Automobile → Automobile
+Food & Beverage → Food & Beverage
+FMCG & CPG → FMCG & CPG
+Real Estate → Real Estate
+PE/VC Firms → PE/VC Firms
+Animation & Gaming → Animation & Gaming
+Internet (Digital Platforms) → Internet (Digital Platforms)
+Spiritual → Spiritual
+Others → Others
+
+════════════════════════════════════════════════════════════
 REGIONS
-════════════════════════════════════════════
+════════════════════════════════════════════════════════════
 North America | EMEA | APAC | LATAM | India
+Note: India is its own region (not APAC) for this classification.
 
-════════════════════════════════════════════
+════════════════════════════════════════════════════════════
 CLOUD PLATFORM
-════════════════════════════════════════════
-Single: AWS | Azure | GCP | Oracle Cloud | IBM Cloud | Alibaba Cloud | DigitalOcean | Cloudflare | Vercel | Netlify | Heroku | On-premise
-Multi-cloud: Multi-cloud (AWS, GCP) pattern — list specific platforms
-Infer: Indian startups → AWS/GCP | Travel portals → AWS | Microsoft-stack → Azure
+════════════════════════════════════════════════════════════
+Single platform: AWS | Azure | GCP | Oracle Cloud | IBM Cloud | Alibaba Cloud | DigitalOcean | Cloudflare | Vercel | Netlify | Heroku | On-premise
+Multi-cloud: Use format "Multi-cloud (AWS, GCP)" listing specific platforms
 
-════════════════════════════════════════════
-ENGINEERING & DEVOPS FIELD FORMAT
-════════════════════════════════════════════
-Both engineeringIT and devOps fields must include team size in this format:
+Inference rules when not explicitly known:
+- Indian startups / SaaS → AWS or GCP
+- Travel portals / OTAs → AWS
+- Microsoft-stack companies → Azure
+- Chinese companies → Alibaba Cloud
+- Government / regulated → On-premise or Azure
+- Cloud-native SaaS → AWS or GCP
+
+════════════════════════════════════════════════════════════
+ENGINEERING & DEVOPS — Format with team size
+════════════════════════════════════════════════════════════
+Both engineeringIT and devOps MUST combine tech/tools with team size:
   engineeringIT: "[Tech Stack] | Team Size: [number or range]"
   devOps:        "[Tools & Practices] | Team Size: [number or range]"
 
-Use LinkedIn team data if provided in research context. Otherwise estimate:
-Engineering team size from total employees:
-- Pure tech/SaaS: 50-70% | Travel/e-commerce: 20-40% | IT services: 60-80% | FMCG/Retail: 5-15%
-DevOps team size from engineering team:
-- Modern SaaS/cloud-native: 10-20% of engineering | Enterprise: 5-10% of engineering
+Engineering team size estimation (% of total employees):
+- Pure tech/SaaS company: 50–70%
+- Travel/e-commerce: 20–40%
+- IT services/consulting: 60–80%
+- FMCG/Retail/non-tech: 5–15%
+- Media/entertainment: 15–25%
+- Fintech: 35–55%
 
-Examples:
-- engineeringIT: "React, Node.js, Python, Java microservices, PostgreSQL, REST APIs | Team Size: 150-200"
-- devOps: "GitHub Actions, Docker, Kubernetes, Terraform, CI/CD pipelines | Team Size: 20-30"
-- engineeringIT: "Java, Spring Boot, Angular, MySQL, Redis | Team Size: 80-120"
-- devOps: "Jenkins, Ansible, Docker, Kubernetes | Team Size: 10-15"
+DevOps team size estimation (% of engineering team):
+- Modern SaaS / cloud-native: 10–20% of engineering
+- Enterprise / traditional: 5–10% of engineering
 
-════════════════════════════════════════════
-INFERENCE RULES (when real data is missing)
-════════════════════════════════════════════
-- Location: .in domain = India. Infer city from company type (travel/fintech → Gurugram or Bangalore)
-- State from city: Bangalore=Karnataka, Mumbai=Maharashtra, Gurugram=Haryana, Hyderabad=Telangana
-- Timezone: India=IST/UTC+5:30, UK=GMT/UTC+0, UAE=GST/UTC+4, Singapore=SGT/UTC+8, US West=PST/UTC-8, US East=EST/UTC-5
-- LinkedIn URL: construct as https://www.linkedin.com/company/[company-name-slug] if not provided
-- Engineering: travel portals=React/Node.js/Python/Java | fintech=Java/Python/Go | SaaS=React/Node.js
-- DevOps: modern startup=GitHub Actions+Docker+Kubernetes | enterprise=Jenkins+Terraform+Kubernetes
-- Revenue: use web search data if available, else estimate from company stage
+Tech stack inference by industry:
+- Travel portals / OTAs: React, Node.js, Python, Java microservices, REST APIs, Redis, PostgreSQL
+- Fintech / payments: Java, Python, Go, Kafka, PostgreSQL, Redis, microservices
+- SaaS / B2B software: React, Node.js, Python, REST/GraphQL APIs, PostgreSQL or MongoDB
+- E-commerce / retail: React/Next.js, Node.js, Magento or Shopify stack, Python
+- Media / OTT: React, Node.js, CDN infrastructure, video streaming tech, Python
+- IT services: Java, .NET, Python, various client tech stacks
+- Healthcare: Java, Python, HL7/FHIR integrations, secure cloud
 
-════════════════════════════════════════════
-OUTPUT — all 20 keys required
-════════════════════════════════════════════
-Return ONLY valid JSON:
+DevOps inference by company type:
+- Modern startup/SaaS: GitHub Actions, Docker, Kubernetes, Terraform, CI/CD
+- Scale-up: Jenkins or GitHub Actions, Docker, Kubernetes, Terraform, monitoring stack
+- Enterprise/traditional: Jenkins, Ansible, Docker, on-premise or hybrid K8s
+- IT services: Jenkins, Ansible, client-specific tooling
+
+════════════════════════════════════════════════════════════
+LOCATION INFERENCE RULES
+════════════════════════════════════════════════════════════
+- .in domain → India
+- .com.au → Australia (APAC)
+- .co.uk / .uk → United Kingdom (EMEA)
+- .ae → UAE (EMEA)
+- .sg → Singapore (APAC)
+- .de → Germany (EMEA)
+
+City → State mapping (India):
+Bangalore/Bengaluru → Karnataka
+Mumbai → Maharashtra
+Delhi/Gurugram/Noida → Haryana / Delhi NCR
+Hyderabad → Telangana
+Chennai → Tamil Nadu
+Pune → Maharashtra
+Kolkata → West Bengal
+Ahmedabad → Gujarat
+
+Timezone inference:
+- India → IST / UTC+5:30
+- UK → GMT / UTC+0 (BST/UTC+1 in summer)
+- UAE → GST / UTC+4
+- Singapore → SGT / UTC+8
+- Australia (East) → AEST / UTC+10
+- Germany/Europe → CET / UTC+1
+- US West → PST / UTC-8
+- US East → EST / UTC-5
+
+════════════════════════════════════════════════════════════
+REVENUE ESTIMATION GUIDELINES
+════════════════════════════════════════════════════════════
+Use web search data if available. Otherwise estimate from company stage and size:
+- StartUp (<50 employees): $0.5M–$5M USD
+- Small (50–200): $5M–$30M USD
+- Medium (200–500): $30M–$100M USD
+- Large (500–1,000): $100M–$300M USD
+- X-Large (1,000–5,000): $300M–$1B USD
+- XX-Large (5,000+): $1B+ USD
+Adjust upward for high-revenue industries (fintech, e-commerce), downward for nonprofits/NGOs.
+
+════════════════════════════════════════════════════════════
+ACCOUNT TYPE REASON — Required evidence-based explanation
+════════════════════════════════════════════════════════════
+Always provide 1–2 sentences citing SPECIFIC evidence:
+- Mention the key signals that led to the classification
+- Reference employee count, revenue model, product ownership, or marketplace nature
+- For Enterprise: mention offline channels or own-product sales
+- For ISV: confirm they own a software product and are independent
+- For Consumer Portal: confirm marketplace model
+- For Agency: confirm IT services without proprietary product
+- For PE/VC: confirm capital investment model
+
+════════════════════════════════════════════════════════════
+OUTPUT — All 20 fields required, return ONLY valid JSON
+════════════════════════════════════════════════════════════
 {
   "accountName": "Official company name",
-  "website": "The company domain e.g. tripjack.com. If a domain was provided use it exactly. If only a company name was provided, find and return the correct domain.",
-  "draInsights": "2-3 sentences: what company does, business model, key products/services, market position",
-  "engineeringIT": "Tech stack AND team size combined. Format: '[Tech Stack] | Team Size: [number or range]'. Example: 'React, Node.js, Python, AWS | Team Size: 150-200 engineers'. Use LinkedIn engineering team data if available, else estimate from total headcount.",
-  "cloudPlatform": "Cloud platform — single name or Multi-cloud (X, Y) pattern",
-  "devOps": "DevOps tools/practices AND team size combined. Format: '[Tools & Practices] | Team Size: [number or range]'. Example: 'GitHub Actions, Docker, Kubernetes, Terraform | Team Size: 20-30'. Use LinkedIn DevOps team data if available, else estimate.",
-  "employeeCount": "Use LinkedIn employee count/range if available, else estimate",
+  "website": "The exact domain provided (e.g. tripjack.com). Do not alter it.",
+  "draInsights": "2–3 sentences: what company does, business model, key products/services, market position and differentiators",
+  "engineeringIT": "Tech stack AND team size. Format: '[Stack] | Team Size: [n]'. Example: 'React, Node.js, Python, PostgreSQL, AWS | Team Size: 150-200'",
+  "cloudPlatform": "Single name or Multi-cloud (X, Y) pattern",
+  "devOps": "Tools/practices AND team size. Format: '[Tools] | Team Size: [n]'. Example: 'GitHub Actions, Docker, Kubernetes, Terraform | Team Size: 20-30'",
+  "employeeCount": "LinkedIn employee count/range if available, else estimated range",
   "accountTypeBySize": "One of: StartUp (<50) | Small (50-200) | Medium (200-500) | Large (500-1000) | X-Large (1000-5000) | XX-Large (5000+)",
   "accountType": "One of: Enterprise | ISV | Consumer Portal | Agency/Service Company | PE/VC Firms",
-  "accountTypeReason": "1-2 sentences explaining WHY with specific evidence",
-  "accountLinkedIn": "Real LinkedIn URL from search if found, else constructed URL",
+  "accountTypeReason": "1–2 sentences of evidence-based reasoning citing specific signals",
+  "accountLinkedIn": "Real LinkedIn URL if found, else constructed as https://www.linkedin.com/company/[slug]",
   "businessType": "One of: B2B | B2C | B2B and B2C",
-  "industry": "Exactly one industry from taxonomy",
-  "subIndustry": "Exactly one matching sub-industry",
-  "revenueUSD": "From web search if available, else estimate in USD millions",
-  "billingCity": "From LinkedIn/search if found, else infer",
-  "billingState": "Derived from city",
-  "billingCountry": "From LinkedIn/search or infer from domain TLD",
+  "industry": "Exactly one industry from taxonomy above",
+  "subIndustry": "Exactly one sub-industry from taxonomy above",
+  "revenueUSD": "From web search if available, else estimated in USD millions (e.g. '$50M-$100M')",
+  "billingCity": "From LinkedIn/search or inferred from domain/company type",
+  "billingState": "Derived from city using mapping above",
+  "billingCountry": "From LinkedIn/search or inferred from domain TLD",
   "region": "One of: North America | EMEA | APAC | LATAM | India",
   "timeZone": "Derived from country/city e.g. IST / UTC+5:30"
 }`;
@@ -350,7 +473,7 @@ serve(async (req: Request) => {
 
     // ── 5. Parallel: Search LinkedIn URL + Company Info ─────
     let linkedInUrl = "";
-    let linkedInData: LinkedInData = { employeeCount: "", employeeRange: "", hqLocation: "", founded: "", industry: "", companyType: "", website: "", about: "" };
+    let linkedInData: LinkedInData = { employeeCount: "", employeeRange: "", hqLocation: "", founded: "", industry: "", companyType: "", website: "", about: "", engineeringTeamSize: "", devOpsTeamSize: "" };
     let webSearchContext = "";
 
     if (serperKey) {
@@ -365,13 +488,11 @@ serve(async (req: Request) => {
         console.log("LinkedIn URL found:", linkedInUrl || "none");
         console.log("Web context length:", webSearchContext.length);
 
-        // Scrape LinkedIn if URL found
         if (linkedInUrl) {
           linkedInData = await scrapeLinkedIn(linkedInUrl);
           console.log("LinkedIn data:", JSON.stringify(linkedInData));
         }
       } catch (searchErr) {
-        // Serper quota exhausted or any other error — silently fall back to Groq-only
         console.log("Web search failed (possibly quota exhausted) — using Groq knowledge only:", searchErr);
         linkedInUrl = "";
         webSearchContext = "";
@@ -380,39 +501,47 @@ serve(async (req: Request) => {
       console.log("No Serper key configured — using Groq knowledge only");
     }
 
-    // ── 7. Build research context for AI ───────────────────
+    // ── 6. Build research context for AI ───────────────────
     const researchContext = [
       linkedInUrl ? `LinkedIn URL: ${linkedInUrl}` : "",
       linkedInData.employeeRange ? `LinkedIn Employee Range: ${linkedInData.employeeRange} employees` : "",
       linkedInData.employeeCount ? `LinkedIn Staff Count: ${linkedInData.employeeCount}` : "",
-      linkedInData.engineeringTeamSize ? `LinkedIn Engineering/Tech Team Size: ${linkedInData.engineeringTeamSize} employees (use in engineeringIT field as Team Size)` : "",
-      linkedInData.devOpsTeamSize ? `LinkedIn DevOps/Infrastructure Team Size: ${linkedInData.devOpsTeamSize} employees (use in devOps field as Team Size)` : "",
+      linkedInData.engineeringTeamSize ? `LinkedIn Engineering/Tech Team Size: ${linkedInData.engineeringTeamSize} (use in engineeringIT field)` : "",
+      linkedInData.devOpsTeamSize ? `LinkedIn DevOps/Infrastructure Team Size: ${linkedInData.devOpsTeamSize} (use in devOps field)` : "",
       linkedInData.hqLocation ? `LinkedIn HQ Location: ${linkedInData.hqLocation}` : "",
       linkedInData.founded ? `Founded: ${linkedInData.founded}` : "",
       linkedInData.about ? `LinkedIn About: ${linkedInData.about}` : "",
       webSearchContext ? `\nWeb Search Results:\n${webSearchContext}` : "",
     ].filter(Boolean).join("\n");
 
-    // ── 8. Call Groq ────────────────────────────────────────
-    const searchWasUsed = !!(linkedInUrl || webSearchContext);
-    // Detect if input looks like a domain or a company name
+    // ── 7. Call Groq ────────────────────────────────────────
     const looksLikeDomain = website.includes('.');
     const userMessage = `Research this company and return the complete 20-field JSON profile.
 
 ${looksLikeDomain ? `Website: ${website}` : `Company Name: ${website}
-Note: User typed the company name directly. Find the website domain yourself and use it in the website field.`}
+Note: User typed the company name directly. Find the correct website domain and use it in the website field.`}
 Company Name (extracted): ${companyName}
 
-${researchContext ? `=== REAL DATA FROM WEB RESEARCH ===\n${researchContext}\n\nUse the above real data to fill fields accurately. LinkedIn employee count is the most reliable source for company size.` : "No web search data available — use your full training knowledge to fill all fields. Make confident inferences based on company type, domain TLD, and industry context. Do not return Unknown when inference is possible."}
+${researchContext ? `=== REAL DATA FROM WEB RESEARCH ===
+${researchContext}
 
-Important:
-- The "website" field MUST be exactly: ${website} — do not change it to the company name
-- If LinkedIn URL was found above, use it exactly as provided
-- If LinkedIn employee range is provided, use it for employeeCount and accountTypeBySize
-- If HQ location is provided, use it for billingCity/State/Country
-- For any fields not covered by research data, use confident inference based on company type and region
-- For Indian companies: region=India, timezone=IST/UTC+5:30
-- Always include devOps field with tools AND team size estimate`;
+Use the above real data to fill fields accurately.
+- LinkedIn employee count is the most reliable signal for size classification
+- LinkedIn HQ location overrides any inferred location
+- LinkedIn About section helps determine account type and business model` : `No web search data available — use your full training knowledge.
+Apply the complete knowledge base rules in your system prompt.
+Make confident inferences based on domain TLD, company name, industry context.
+Never return "Unknown" when inference is possible.`}
+
+CLASSIFICATION REMINDERS (apply decision tree in system prompt):
+1. Check PE/VC first → then Agency/IT Services → then ISV → then Consumer Portal → default Enterprise
+2. Non-IT service companies (e.g. logistics, retail, healthcare) → Enterprise NOT Agency
+3. Company selling only its OWN products online → Enterprise NOT Consumer Portal
+4. ISV must own a software product AND be independent (not acquired)
+5. For accountTypeReason: cite specific evidence (employee count, revenue model, product ownership, marketplace vs own-products)
+6. For Indian companies: region=India (not APAC), timezone=IST/UTC+5:30
+7. Always include team size estimates in engineeringIT and devOps fields
+8. The "website" field must be exactly: ${website}`;
 
     const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
@@ -446,7 +575,7 @@ Important:
       });
     }
 
-    // ── 9. Parse JSON ───────────────────────────────────────
+    // ── 8. Parse JSON ───────────────────────────────────────
     const jsonMatch = rawText.match(/```(?:json)?\s*([\s\S]*?)```/);
     if (jsonMatch) rawText = jsonMatch[1];
     else {
@@ -465,12 +594,12 @@ Important:
       });
     }
 
-    // ── 10. Override with real LinkedIn URL if found ────────
+    // ── 9. Override with real LinkedIn URL if found ─────────
     if (linkedInUrl && linkedInUrl.includes("linkedin.com/company/")) {
       enriched.accountLinkedIn = linkedInUrl;
     }
 
-    // ── 11. Return ──────────────────────────────────────────
+    // ── 10. Return ──────────────────────────────────────────
     return new Response(JSON.stringify({ data: enriched, remaining }), {
       status: 200,
       headers: { ...CORS, "Content-Type": "application/json", "X-RateLimit-Remaining": String(remaining) },
