@@ -29,9 +29,10 @@ function checkRateLimit(userId: string): { allowed: boolean; remaining: number }
 }
 
 // ── Step 1: Search for LinkedIn URL via Serper ──────────────
-async function findLinkedInUrl(companyName: string, website: string, serperKey: string): Promise<string> {
+async function findLinkedInUrl(companyName: string, searchAnchor: string, serperKey: string): Promise<string> {
   try {
-    const query = `${companyName} site:linkedin.com/company`;
+    // Use full domain (e.g. "blackbox.ai") not just slug ("blackbox") to avoid wrong company matches
+    const query = `"${searchAnchor}" site:linkedin.com/company`;
     const res = await fetch("https://google.serper.dev/search", {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-API-KEY": serperKey },
@@ -131,9 +132,11 @@ async function scrapeLinkedIn(linkedinUrl: string): Promise<LinkedInData> {
 }
 
 // ── Step 3: Search for extra company info ───────────────────
-async function searchCompanyInfo(companyName: string, website: string, serperKey: string): Promise<string> {
+async function searchCompanyInfo(companyName: string, searchAnchor: string, serperKey: string): Promise<string> {
   try {
-    const query = `${companyName} ${website} company headquarters employees revenue`;
+    // Quote the full domain to anchor results to the right company
+    // e.g. "blackbox.ai" company info — NOT generic "blackbox"
+    const query = `"${searchAnchor}" company headquarters employees revenue about`;
     const res = await fetch("https://google.serper.dev/search", {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-API-KEY": serperKey },
@@ -171,11 +174,11 @@ interface CloudEvidence {
   snippet: string;
 }
 
-async function searchCloudPlatform(companyName: string, website: string, serperKey: string): Promise<CloudEvidence> {
+async function searchCloudPlatform(companyName: string, searchAnchor: string, serperKey: string): Promise<CloudEvidence> {
   const empty: CloudEvidence = { platform: "", sourceUrl: "", snippet: "" };
   try {
-    // Clean domain: "briter.co" → "briter.co", slug: "briter"
-    const cleanDomain = website.replace(/^https?:\/\//, "").replace(/^www\./, "").split("/")[0];
+    // searchAnchor is already the clean domain e.g. "blackbox.ai", "briter.co"
+    const cleanDomain = searchAnchor;
     const domainSlug = cleanDomain.split(".")[0].toLowerCase();
 
     // Cloud keyword → platform name mapping
@@ -667,13 +670,24 @@ serve(async (req: Request) => {
       });
     }
 
-    // ── 4. Extract company name from website ────────────────
-    const companyName = website
+    // ── 4. Extract company name + search anchor from website ──
+    // Always preserve the full domain for searching — never just use the slug alone
+    // "blackbox.ai" → cleanDomain="blackbox.ai", companyName="blackbox", searchAnchor="blackbox.ai"
+    // "briter.co"   → cleanDomain="briter.co",   companyName="briter",   searchAnchor="briter.co"
+    const cleanDomain = website
       .replace(/^https?:\/\//, "")
       .replace(/^www\./, "")
+      .split("/")[0]
+      .toLowerCase();
+
+    const companyName = cleanDomain
       .split(".")[0]
       .replace(/-/g, " ")
       .trim();
+
+    // searchAnchor: always prefer full domain over bare slug to avoid ambiguity
+    // e.g. "blackbox.ai" not "blackbox" (which would match blackbox.com)
+    const searchAnchor = cleanDomain; // e.g. "blackbox.ai", "briter.co", "tripjack.com"
 
     // ── 5. Parallel: Search LinkedIn URL + Company Info + Cloud Platform ─────
     let linkedInUrl = "";
@@ -685,9 +699,9 @@ serve(async (req: Request) => {
       console.log("Running web search for:", website);
       try {
         const [liUrl, webCtx, cloudEv] = await Promise.all([
-          findLinkedInUrl(companyName, website, serperKey),
-          searchCompanyInfo(companyName, website, serperKey),
-          searchCloudPlatform(companyName, website, serperKey),
+          findLinkedInUrl(companyName, searchAnchor, serperKey),
+          searchCompanyInfo(companyName, searchAnchor, serperKey),
+          searchCloudPlatform(companyName, searchAnchor, serperKey),
         ]);
         linkedInUrl = liUrl;
         webSearchContext = webCtx;
@@ -732,7 +746,10 @@ serve(async (req: Request) => {
     const looksLikeDomain = website.includes('.');
     const userMessage = `Research this company and return the complete 20-field JSON profile.
 
-${looksLikeDomain ? `Website: ${website}` : `Company Name: ${website}
+${looksLikeDomain
+  ? `Website: ${website}
+⚠️ DOMAIN DISAMBIGUATION: The exact domain is "${cleanDomain}". This may differ from similarly-named companies on different TLDs (e.g. blackbox.ai is NOT blackbox.com — they are completely different companies). All research must be anchored to "${cleanDomain}" specifically.`
+  : `Company Name: ${website}
 Note: User typed the company name directly. Find the correct website domain and use it in the website field.`}
 Company Name (extracted): ${companyName}
 
@@ -740,6 +757,7 @@ ${researchContext ? `=== REAL DATA FROM WEB RESEARCH ===
 ${researchContext}
 
 Use the above real data to fill fields accurately.
+- All data above is anchored to "${cleanDomain}" — do not mix with data from other domains
 - LinkedIn employee count is the most reliable signal for size classification
 - LinkedIn HQ location overrides any inferred location
 - LinkedIn About section helps determine account type and business model
@@ -750,6 +768,7 @@ ${cloudEvidence.platform && cloudEvidence.sourceUrl
   : `- ❌ No cloud source found via BuiltWith/Wappalyzer/StackShare/careers search. Infer the platform from company type/industry. Write: "[Platform] | Source: No verified source found (inferred from [specific reason])"`
 }` : `No web search data available — use your full training knowledge.
 Apply the complete knowledge base rules in your system prompt.
+⚠️ Research must be specific to "${cleanDomain}" — not similarly named companies on other TLDs.
 Make confident inferences based on domain TLD, company name, industry context.
 Never return "Unknown" when inference is possible.`}
 
