@@ -174,22 +174,37 @@ interface CloudEvidence {
 async function searchCloudPlatform(companyName: string, website: string, serperKey: string): Promise<CloudEvidence> {
   const empty: CloudEvidence = { platform: "", sourceUrl: "", snippet: "" };
   try {
-    // Search for cloud provider case studies and tech stack pages
-    const queries = [
-      `${companyName} AWS "amazon web services" case study OR customer`,
-      `${companyName} Google Cloud GCP case study OR customer`,
-      `${companyName} Microsoft Azure case study OR customer`,
-      `${companyName} cloud infrastructure tech stack`,
-    ];
+    // Extract clean domain slug for matching (e.g. "briter" from "briter.co")
+    const domainSlug = website
+      .replace(/^https?:\/\//, "")
+      .replace(/^www\./, "")
+      .split(".")[0]
+      .toLowerCase();
+
+    // Company name tokens for fuzzy matching (all must appear in result)
+    const companyTokens = companyName.toLowerCase().split(/\s+/).filter(t => t.length > 2);
+
+    // Helper: does this search result actually refer to our company?
+    function isAboutOurCompany(link: string, title: string, snippet: string): boolean {
+      const combined = (link + " " + title + " " + snippet).toLowerCase();
+      // Match domain slug in the URL or content
+      if (combined.includes(domainSlug)) return true;
+      // Match all company name tokens in the combined text
+      if (companyTokens.length > 0 && companyTokens.every(t => combined.includes(t))) return true;
+      return false;
+    }
 
     const cloudKeywords: Record<string, string> = {
       "amazon web services": "AWS",
       "aws.amazon": "AWS",
       " aws ": "AWS",
       "amazonaws": "AWS",
+      "hosted on aws": "AWS",
+      "powered by aws": "AWS",
       "google cloud": "GCP",
-      "gcp": "GCP",
+      " gcp ": "GCP",
       "firebase": "GCP",
+      "bigquery": "GCP",
       "microsoft azure": "Azure",
       "azure.com": "Azure",
       " azure ": "Azure",
@@ -203,7 +218,13 @@ async function searchCloudPlatform(companyName: string, website: string, serperK
       "alibaba cloud": "Alibaba Cloud",
     };
 
-    // Try all 4 queries in parallel
+    // Focused queries — use site: to target only reliable tech stack sources
+    const queries = [
+      `"${companyName}" site:stackshare.io OR site:builtwith.com OR site:crunchbase.com`,
+      `"${companyName}" AWS OR "Google Cloud" OR Azure cloud infrastructure`,
+      `"${companyName}" ${website} tech stack cloud`,
+    ];
+
     const results = await Promise.all(
       queries.map(async (q) => {
         try {
@@ -220,50 +241,55 @@ async function searchCloudPlatform(companyName: string, website: string, serperK
       })
     );
 
-    // Walk through results looking for cloud evidence
+    // Official cloud customer page domains — only valid if URL contains company slug
+    const officialDomains = [
+      "aws.amazon.com/customers",
+      "aws.amazon.com/solutions/case-studies",
+      "cloud.google.com/customers",
+      "customers.microsoft.com",
+      "azure.microsoft.com/case-studies",
+    ];
+
     for (const data of results) {
       if (!data) continue;
 
-      // Check official cloud customer pages first (highest priority)
-      const officialDomains = [
-        "aws.amazon.com/customers",
-        "aws.amazon.com/solutions/case-studies",
-        "cloud.google.com/customers",
-        "customers.microsoft.com",
-        "azure.microsoft.com/case-studies",
-      ];
-
       for (const item of data?.organic || []) {
         const link: string = item.link || "";
-        const snippet: string = (item.snippet || item.title || "").toLowerCase();
+        const title: string = item.title || "";
+        const snippet: string = item.snippet || "";
+
+        // ── GATE: result must be about our company ──────────
+        if (!isAboutOurCompany(link, title, snippet)) continue;
 
         // Official cloud case study page — highest confidence
         for (const domain of officialDomains) {
-          if (link.includes(domain) && link.toLowerCase().includes(companyName.toLowerCase().replace(/\s/g, ""))) {
+          if (link.includes(domain)) {
             const platform = link.includes("aws") ? "AWS"
               : link.includes("google") ? "GCP"
               : "Azure";
-            return { platform, sourceUrl: link, snippet: item.snippet || "" };
+            return { platform, sourceUrl: link, snippet };
           }
         }
 
-        // Match cloud keywords in snippets
+        // StackShare / BuiltWith / Crunchbase tech stack page
+        const techStackSources = ["stackshare.io", "builtwith.com", "crunchbase.com"];
+        for (const src of techStackSources) {
+          if (link.includes(src)) {
+            const combined = (title + " " + snippet).toLowerCase();
+            for (const [keyword, platform] of Object.entries(cloudKeywords)) {
+              if (combined.includes(keyword)) {
+                return { platform, sourceUrl: link, snippet };
+              }
+            }
+          }
+        }
+
+        // General result — keyword match in snippet, but company match already confirmed above
+        const combined = (title + " " + snippet).toLowerCase();
         for (const [keyword, platform] of Object.entries(cloudKeywords)) {
-          if (snippet.includes(keyword)) {
-            return { platform, sourceUrl: link, snippet: item.snippet || item.title || "" };
+          if (combined.includes(keyword)) {
+            return { platform, sourceUrl: link, snippet };
           }
-        }
-      }
-
-      // Check answer box
-      const answerText = ((data?.answerBox?.answer || "") + " " + (data?.answerBox?.snippet || "")).toLowerCase();
-      for (const [keyword, platform] of Object.entries(cloudKeywords)) {
-        if (answerText.includes(keyword)) {
-          return {
-            platform,
-            sourceUrl: data?.answerBox?.link || data?.organic?.[0]?.link || "",
-            snippet: data?.answerBox?.snippet || data?.answerBox?.answer || "",
-          };
         }
       }
     }
@@ -698,7 +724,7 @@ ${cloudEvidence.platform && cloudEvidence.sourceUrl
   ? `- ⚠️ Cloud Platform CONFIRMED: Use "${cloudEvidence.platform}" and source URL "${cloudEvidence.sourceUrl}" directly in the cloudPlatform field. Format: "${cloudEvidence.platform} | Source: ${cloudEvidence.sourceUrl}"`
   : cloudEvidence.platform
   ? `- Cloud Platform detected as "${cloudEvidence.platform}" from web search — use this with the best available source URL from the search results above`
-  : `- No cloud platform found in search — infer from company type/tech stack and provide the most relevant URL from search results above as the source (e.g. company careers page, tech blog, or Crunchbase). NEVER just say "Inferred from typical stack" — always attach a real URL.`
+  : `- No confirmed cloud platform found via search. Infer from company type/tech stack and use one of these REAL URLs already found as the source: ${linkedInUrl || `https://${website}`}. Format example: "AWS | Source: ${linkedInUrl || `https://${website}`} (inferred from company tech profile)". NEVER use a URL that belongs to another company.`
 }` : `No web search data available — use your full training knowledge.
 Apply the complete knowledge base rules in your system prompt.
 Make confident inferences based on domain TLD, company name, industry context.
