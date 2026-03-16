@@ -395,14 +395,33 @@ X-Large (1k–5k):  $300M–$1B  | XX-Large (5k+):     $1B+
 Adjust up for fintech/e-commerce, down for NGOs/nonprofits.
 
 ════════════════════════════════════════════════════════════
-ACCOUNT TYPE REASON — Evidence-based, specific
+ACCOUNT TYPE REASON — Evidence-based, must include product/platform name
 ════════════════════════════════════════════════════════════
-Always cite SPECIFIC signals in 1–2 sentences:
-  ISV: name the proprietary product(s), mention subscription/licensing model, confirm independence
-  Agency: specify the IT services offered, confirm no proprietary product
-  Enterprise: cite employee count + offline channel or own-product sales
-  Consumer Portal: confirm marketplace model, buyer-seller connection, commission/ad revenue
-  PE/VC: confirm capital investment model, no products/services sold
+Always cite SPECIFIC signals in 1–2 sentences. ALWAYS mention the product or platform name or type:
+  ISV: MUST name the specific proprietary product(s) or platform (e.g. "Briter Intelligence platform", "AgBase product"), mention subscription/licensing model, confirm independence. Format: "[Company] owns [Product Name], a [type of platform] offering [subscriptions/licensing] to [target customers]."
+  Agency: specify the IT services offered (e.g. "app development, IT consulting"), confirm no proprietary product, mention client delivery model. Format: "[Company] provides [specific IT services] to clients with no proprietary software product."
+  Enterprise: cite employee count or business lines + offline/own-product sales channel. Format: "[Company] operates [N+ employees / multiple business lines] with revenue primarily from [offline stores / direct sales / own product sales]."
+  Consumer Portal: name the marketplace and its buyer-seller connection, confirm commission/ad/transaction revenue. Format: "[Company] operates a marketplace connecting [buyers] and [sellers], monetized via [commissions/ads/transactions]."
+  PE/VC: confirm capital investment model and investment stage focus. Format: "[Company] is a [PE/VC] firm that invests capital in [stage] companies, not selling products or services."
+
+════════════════════════════════════════════════════════════
+CLOUD PLATFORM — Include source evidence URL
+════════════════════════════════════════════════════════════
+Format: "[Platform Name] | Source: [URL]"
+Examples:
+  "AWS | Source: https://aws.amazon.com/customers/company-name"
+  "Multi-cloud (AWS, GCP) | Source: https://techcrunch.com/article-about-company"
+  "Azure | Source: https://linkedin.com/company/xyz (inferred from Microsoft stack)"
+  "AWS | Source: https://company.com/careers (inferred from job postings)"
+
+Source priority (use the best available):
+  1. Official case study page: aws.amazon.com/customers/, cloud.google.com/customers/, azure.microsoft.com/case-studies/
+  2. Company's own tech blog or careers page mentioning cloud stack
+  3. LinkedIn or Crunchbase tech stack mention
+  4. Web search result snippet that mentions the platform
+  5. If inferred (no direct source found): "[Platform] | Source: Inferred from [reason — e.g. Indian SaaS startup typical stack / Microsoft-stack job postings / company tech blog]"
+
+Never leave source blank. If no direct URL found, always write "Inferred from [specific reason]".
 
 ════════════════════════════════════════════════════════════
 OUTPUT — All 20 fields required. Return ONLY valid JSON.
@@ -412,12 +431,12 @@ OUTPUT — All 20 fields required. Return ONLY valid JSON.
   "website": "Exact domain as provided — do NOT change it",
   "draInsights": "2–3 sentences: what company does, business model, key products/services, market position",
   "engineeringIT": "[Tech Stack] | Team Size: [n or range]",
-  "cloudPlatform": "Single name or Multi-cloud (X, Y)",
+  "cloudPlatform": "[Platform Name] | Source: [URL or 'Inferred from [reason]']",
   "devOps": "[Tools & Practices] | Team Size: [n or range]",
   "employeeCount": "LinkedIn range if available, else estimated range",
   "accountTypeBySize": "StartUp (<50) | Small (50-200) | Medium (200-500) | Large (500-1000) | X-Large (1000-5000) | XX-Large (5000+)",
   "accountType": "Enterprise | ISV | Consumer Portal | Agency/Service Company | PE/VC Firms",
-  "accountTypeReason": "1–2 sentences citing specific evidence (product name, revenue model, employee count, etc.)",
+  "accountTypeReason": "1–2 sentences naming the specific product/platform and citing the revenue model and classification signal",
   "accountLinkedIn": "Real URL if found, else https://www.linkedin.com/company/[slug]",
   "businessType": "B2B | B2C | B2B and B2C",
   "industry": "Exactly one from taxonomy",
@@ -561,10 +580,11 @@ CLASSIFICATION REMINDERS — read carefully before classifying:
 4. Non-IT service companies → Enterprise NOT Agency (e.g. logistics, real estate, accounting, law firms)
 5. Company selling only its OWN products online → Enterprise NOT Consumer Portal
 6. ISV must own a product AND be independent (not a subsidiary)
-7. accountTypeReason must cite: product name (for ISV), specific services (for Agency), employee count + channel (for Enterprise)
-8. For Indian companies: region=India (NOT APAC), timezone=IST/UTC+5:30
-9. Always include team size estimates in both engineeringIT and devOps fields
-10. The "website" field must be exactly: ${website}`;
+7. ⚠️ accountTypeReason MUST name the specific product or platform (e.g. "Briter Intelligence platform", "Zoho CRM", "their recruitment SaaS platform") — not just say "owns a software product"
+8. ⚠️ cloudPlatform MUST include a source URL or "Inferred from [reason]" — format: "[Platform] | Source: [URL or reason]"
+9. For Indian companies: region=India (NOT APAC), timezone=IST/UTC+5:30
+10. Always include team size estimates in both engineeringIT and devOps fields
+11. The "website" field must be exactly: ${website}`;
 
     const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
