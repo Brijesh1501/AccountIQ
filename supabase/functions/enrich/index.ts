@@ -174,125 +174,152 @@ interface CloudEvidence {
 async function searchCloudPlatform(companyName: string, website: string, serperKey: string): Promise<CloudEvidence> {
   const empty: CloudEvidence = { platform: "", sourceUrl: "", snippet: "" };
   try {
-    // Extract clean domain slug for matching (e.g. "briter" from "briter.co")
-    const domainSlug = website
-      .replace(/^https?:\/\//, "")
-      .replace(/^www\./, "")
-      .split(".")[0]
-      .toLowerCase();
+    // Clean domain: "briter.co" → "briter.co", slug: "briter"
+    const cleanDomain = website.replace(/^https?:\/\//, "").replace(/^www\./, "").split("/")[0];
+    const domainSlug = cleanDomain.split(".")[0].toLowerCase();
 
-    // Company name tokens for fuzzy matching (all must appear in result)
-    const companyTokens = companyName.toLowerCase().split(/\s+/).filter(t => t.length > 2);
-
-    // Helper: does this search result actually refer to our company?
-    function isAboutOurCompany(link: string, title: string, snippet: string): boolean {
-      const combined = (link + " " + title + " " + snippet).toLowerCase();
-      // Match domain slug in the URL or content
-      if (combined.includes(domainSlug)) return true;
-      // Match all company name tokens in the combined text
-      if (companyTokens.length > 0 && companyTokens.every(t => combined.includes(t))) return true;
-      return false;
-    }
-
+    // Cloud keyword → platform name mapping
     const cloudKeywords: Record<string, string> = {
-      "amazon web services": "AWS",
-      "aws.amazon": "AWS",
-      " aws ": "AWS",
-      "amazonaws": "AWS",
-      "hosted on aws": "AWS",
-      "powered by aws": "AWS",
-      "google cloud": "GCP",
-      " gcp ": "GCP",
-      "firebase": "GCP",
-      "bigquery": "GCP",
-      "microsoft azure": "Azure",
-      "azure.com": "Azure",
-      " azure ": "Azure",
-      "digitalocean": "DigitalOcean",
-      "cloudflare": "Cloudflare",
-      "heroku": "Heroku",
-      "vercel": "Vercel",
-      "netlify": "Netlify",
-      "oracle cloud": "Oracle Cloud",
-      "ibm cloud": "IBM Cloud",
+      "amazon web services": "AWS", "aws.amazon": "AWS", " aws ": "AWS",
+      "amazonaws.com": "AWS", "s3.amazonaws": "AWS", "ec2": "AWS",
+      "elasticbeanstalk": "AWS", "cloudfront": "AWS",
+      "google cloud": "GCP", "googlecloud": "GCP", " gcp ": "GCP",
+      "firebase": "GCP", "bigquery": "GCP", "cloud.google": "GCP",
+      "microsoft azure": "Azure", "azure.com": "Azure", " azure ": "Azure",
+      "azure storage": "Azure", "azure functions": "Azure",
+      "digitalocean": "DigitalOcean", "cloudflare": "Cloudflare",
+      "heroku": "Heroku", "vercel": "Vercel", "netlify": "Netlify",
+      "oracle cloud": "Oracle Cloud", "ibm cloud": "IBM Cloud",
       "alibaba cloud": "Alibaba Cloud",
     };
 
-    // Focused queries — use site: to target only reliable tech stack sources
-    const queries = [
-      `"${companyName}" site:stackshare.io OR site:builtwith.com OR site:crunchbase.com`,
-      `"${companyName}" AWS OR "Google Cloud" OR Azure cloud infrastructure`,
-      `"${companyName}" ${website} tech stack cloud`,
-    ];
+    function detectPlatform(text: string): string {
+      const t = " " + text.toLowerCase() + " ";
+      for (const [kw, platform] of Object.entries(cloudKeywords)) {
+        if (t.includes(kw)) return platform;
+      }
+      return "";
+    }
 
-    const results = await Promise.all(
-      queries.map(async (q) => {
-        try {
-          const res = await fetch("https://google.serper.dev/search", {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "X-API-KEY": serperKey },
-            body: JSON.stringify({ q, num: 5 }),
-          });
-          if (!res.ok) return null;
-          return await res.json();
-        } catch {
-          return null;
-        }
-      })
-    );
+    // Strict company match: URL must contain domain slug OR company name
+    function isOurCompany(link: string, title: string, snippet: string): boolean {
+      const url = link.toLowerCase();
+      const content = (title + " " + snippet).toLowerCase();
+      // URL contains domain slug (most reliable)
+      if (url.includes(domainSlug)) return true;
+      // URL is a profile page for our company on a tech site
+      const techSites = ["builtwith.com", "wappalyzer.com", "stackshare.io", "crunchbase.com", "linkedin.com"];
+      for (const site of techSites) {
+        if (url.includes(site) && url.includes(domainSlug)) return true;
+      }
+      // Content mentions our company domain
+      if (content.includes(cleanDomain)) return true;
+      return false;
+    }
 
-    // Official cloud customer page domains — only valid if URL contains company slug
-    const officialDomains = [
-      "aws.amazon.com/customers",
-      "aws.amazon.com/solutions/case-studies",
-      "cloud.google.com/customers",
-      "customers.microsoft.com",
-      "azure.microsoft.com/case-studies",
-    ];
-
-    for (const data of results) {
-      if (!data) continue;
-
-      for (const item of data?.organic || []) {
-        const link: string = item.link || "";
-        const title: string = item.title || "";
-        const snippet: string = item.snippet || "";
-
-        // ── GATE: result must be about our company ──────────
-        if (!isAboutOurCompany(link, title, snippet)) continue;
-
-        // Official cloud case study page — highest confidence
-        for (const domain of officialDomains) {
-          if (link.includes(domain)) {
-            const platform = link.includes("aws") ? "AWS"
-              : link.includes("google") ? "GCP"
-              : "Azure";
-            return { platform, sourceUrl: link, snippet };
-          }
-        }
-
-        // StackShare / BuiltWith / Crunchbase tech stack page
-        const techStackSources = ["stackshare.io", "builtwith.com", "crunchbase.com"];
-        for (const src of techStackSources) {
-          if (link.includes(src)) {
-            const combined = (title + " " + snippet).toLowerCase();
-            for (const [keyword, platform] of Object.entries(cloudKeywords)) {
-              if (combined.includes(keyword)) {
-                return { platform, sourceUrl: link, snippet };
-              }
-            }
-          }
-        }
-
-        // General result — keyword match in snippet, but company match already confirmed above
-        const combined = (title + " " + snippet).toLowerCase();
-        for (const [keyword, platform] of Object.entries(cloudKeywords)) {
-          if (combined.includes(keyword)) {
-            return { platform, sourceUrl: link, snippet };
+    // ── TIER 1: BuiltWith direct profile ───────────────────
+    // builtwith.com/website/briter.co shows exact tech stack
+    const builtWithUrl = `https://builtwith.com/website/${cleanDomain}`;
+    try {
+      const bwRes = await fetch("https://google.serper.dev/search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-API-KEY": serperKey },
+        body: JSON.stringify({ q: `site:builtwith.com "${cleanDomain}"`, num: 3 }),
+      });
+      if (bwRes.ok) {
+        const bwData = await bwRes.json();
+        for (const item of bwData?.organic || []) {
+          const link: string = item.link || "";
+          if (link.includes("builtwith.com") && link.includes(domainSlug)) {
+            const platform = detectPlatform(item.title + " " + item.snippet);
+            if (platform) return { platform, sourceUrl: link, snippet: item.snippet || "" };
+            // BuiltWith page found but no cloud in snippet — still return URL as best source
+            return { platform: "", sourceUrl: link, snippet: item.snippet || "" };
           }
         }
       }
-    }
+    } catch { /* continue */ }
+
+    // ── TIER 2: Wappalyzer profile ─────────────────────────
+    try {
+      const wapRes = await fetch("https://google.serper.dev/search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-API-KEY": serperKey },
+        body: JSON.stringify({ q: `site:wappalyzer.com "${cleanDomain}"`, num: 3 }),
+      });
+      if (wapRes.ok) {
+        const wapData = await wapRes.json();
+        for (const item of wapData?.organic || []) {
+          const link: string = item.link || "";
+          if (link.includes("wappalyzer.com") && link.includes(domainSlug)) {
+            const platform = detectPlatform(item.title + " " + item.snippet);
+            if (platform) return { platform, sourceUrl: link, snippet: item.snippet || "" };
+            return { platform: "", sourceUrl: link, snippet: item.snippet || "" };
+          }
+        }
+      }
+    } catch { /* continue */ }
+
+    // ── TIER 3: StackShare profile ──────────────────────────
+    try {
+      const ssRes = await fetch("https://google.serper.dev/search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-API-KEY": serperKey },
+        body: JSON.stringify({ q: `site:stackshare.io "${companyName}"`, num: 3 }),
+      });
+      if (ssRes.ok) {
+        const ssData = await ssRes.json();
+        for (const item of ssData?.organic || []) {
+          const link: string = item.link || "";
+          const title: string = item.title || "";
+          if (link.includes("stackshare.io") && (link.includes(domainSlug) || title.toLowerCase().includes(companyName.toLowerCase()))) {
+            const platform = detectPlatform(title + " " + item.snippet);
+            if (platform) return { platform, sourceUrl: link, snippet: item.snippet || "" };
+            return { platform: "", sourceUrl: link, snippet: item.snippet || "" };
+          }
+        }
+      }
+    } catch { /* continue */ }
+
+    // ── TIER 4: Company careers/jobs page ──────────────────
+    try {
+      const careersRes = await fetch("https://google.serper.dev/search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-API-KEY": serperKey },
+        body: JSON.stringify({ q: `site:${cleanDomain} (AWS OR "Google Cloud" OR Azure OR cloud OR infrastructure OR DevOps) (careers OR jobs OR engineering OR tech)`, num: 5 }),
+      });
+      if (careersRes.ok) {
+        const careersData = await careersRes.json();
+        for (const item of careersData?.organic || []) {
+          const link: string = item.link || "";
+          if (link.includes(cleanDomain)) {
+            const platform = detectPlatform(item.title + " " + item.snippet);
+            if (platform) return { platform, sourceUrl: link, snippet: item.snippet || "" };
+          }
+        }
+      }
+    } catch { /* continue */ }
+
+    // ── TIER 5: Company tech blog / about page ──────────────
+    try {
+      const techBlogRes = await fetch("https://google.serper.dev/search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-API-KEY": serperKey },
+        body: JSON.stringify({ q: `"${companyName}" AWS OR "Google Cloud" OR Azure tech stack engineering blog`, num: 5 }),
+      });
+      if (techBlogRes.ok) {
+        const blogData = await techBlogRes.json();
+        for (const item of blogData?.organic || []) {
+          const link: string = item.link || "";
+          const title: string = item.title || "";
+          const snippet: string = item.snippet || "";
+          // Must be about our company
+          if (!isOurCompany(link, title, snippet)) continue;
+          const platform = detectPlatform(title + " " + snippet);
+          if (platform) return { platform, sourceUrl: link, snippet };
+        }
+      }
+    } catch { /* continue */ }
 
     return empty;
   } catch (e) {
@@ -542,27 +569,23 @@ Always cite SPECIFIC signals in 1–2 sentences. ALWAYS mention the product or p
   PE/VC: confirm capital investment model and investment stage focus. Format: "[Company] is a [PE/VC] firm that invests capital in [stage] companies, not selling products or services."
 
 ════════════════════════════════════════════════════════════
-CLOUD PLATFORM — Always include a real source URL
+CLOUD PLATFORM — Format with source
 ════════════════════════════════════════════════════════════
-Format: "[Platform Name] | Source: [URL]"
-Examples:
-  "AWS | Source: https://aws.amazon.com/customers/freshworks"
-  "GCP | Source: https://cloud.google.com/customers/razorpay"
-  "Multi-cloud (AWS, GCP) | Source: https://techcrunch.com/2023/article-about-company"
-  "AWS | Source: https://company.com/careers (AWS mentioned in job postings)"
-  "Azure | Source: https://linkedin.com/company/xyz (Microsoft stack detected)"
+Format: "[Platform Name] | Source: [URL] ([source type])"
 
-Source priority — always pick the BEST available URL:
-  1. Official cloud case study: aws.amazon.com/customers/ OR cloud.google.com/customers/ OR azure.microsoft.com/case-studies/
-  2. Company tech blog or engineering blog post mentioning the platform
-  3. Company careers/jobs page mentioning AWS/GCP/Azure in requirements
-  4. Crunchbase, StackShare, or BuiltWith profile page
-  5. Any news article or press release mentioning the platform
-  6. Company LinkedIn page or About page
+Source tiers in priority order:
+  1. BuiltWith profile:   "AWS | Source: https://builtwith.com/website/company.com (BuiltWith)"
+  2. Wappalyzer profile:  "GCP | Source: https://wappalyzer.com/technologies/company (Wappalyzer)"
+  3. StackShare profile:  "Azure | Source: https://stackshare.io/company/stack (StackShare)"
+  4. Company careers page: "AWS | Source: https://company.com/careers (Job posting mentions AWS)"
+  5. Company tech blog:   "GCP | Source: https://engineering.company.com/post (Engineering blog)"
+  6. If source NOT found: "[Platform] | Source: No verified source found (inferred from [specific reason e.g. Indian SaaS startup, Python/data stack, Microsoft stack job postings])"
 
-⚠️ NEVER output "Inferred from typical SaaS stack" or any generic inference phrase WITHOUT a URL.
-⚠️ If cloud evidence is provided in the research context above, use EXACTLY that platform and URL.
-⚠️ If no cloud URL was found by search, use the company's own website or LinkedIn URL as the source and note what was detected (e.g. "AWS | Source: https://company.com (AWS S3 bucket references detected in page source)"). Always attach a real URL.
+⚠️ RULES:
+  - If cloud evidence is provided in research context → use that platform and URL exactly
+  - If a BuiltWith/Wappalyzer/StackShare URL is provided but no platform detected in its snippet → use that URL as the source with your best platform inference
+  - NEVER use a URL belonging to a different company (e.g. Mitsui, Freshworks) as the source for another company
+  - If no source found: write "No verified source found" — do NOT fabricate a URL
 
 ════════════════════════════════════════════════════════════
 OUTPUT — All 20 fields required. Return ONLY valid JSON.
@@ -721,10 +744,10 @@ Use the above real data to fill fields accurately.
 - LinkedIn HQ location overrides any inferred location
 - LinkedIn About section helps determine account type and business model
 ${cloudEvidence.platform && cloudEvidence.sourceUrl
-  ? `- ⚠️ Cloud Platform CONFIRMED: Use "${cloudEvidence.platform}" and source URL "${cloudEvidence.sourceUrl}" directly in the cloudPlatform field. Format: "${cloudEvidence.platform} | Source: ${cloudEvidence.sourceUrl}"`
-  : cloudEvidence.platform
-  ? `- Cloud Platform detected as "${cloudEvidence.platform}" from web search — use this with the best available source URL from the search results above`
-  : `- No confirmed cloud platform found via search. Infer from company type/tech stack and use one of these REAL URLs already found as the source: ${linkedInUrl || `https://${website}`}. Format example: "AWS | Source: ${linkedInUrl || `https://${website}`} (inferred from company tech profile)". NEVER use a URL that belongs to another company.`
+  ? `- ✅ Cloud Platform CONFIRMED: "${cloudEvidence.platform}" | Source: ${cloudEvidence.sourceUrl}. Use this exactly in cloudPlatform field.`
+  : cloudEvidence.sourceUrl && !cloudEvidence.platform
+  ? `- 🔍 Tech profile page found but cloud platform not detected in snippet: ${cloudEvidence.sourceUrl}. Infer the most likely platform from company type and use this URL as the source.`
+  : `- ❌ No cloud source found via BuiltWith/Wappalyzer/StackShare/careers search. Infer the platform from company type/industry. Write: "[Platform] | Source: No verified source found (inferred from [specific reason])"`
 }` : `No web search data available — use your full training knowledge.
 Apply the complete knowledge base rules in your system prompt.
 Make confident inferences based on domain TLD, company name, industry context.
@@ -738,7 +761,7 @@ CLASSIFICATION REMINDERS — read carefully before classifying:
 5. Company selling only its OWN products online → Enterprise NOT Consumer Portal
 6. ISV must own a product AND be independent (not a subsidiary)
 7. ⚠️ accountTypeReason MUST name the specific product or platform (e.g. "Briter Intelligence platform", "Zoho CRM", "their recruitment SaaS platform") — not just say "owns a software product"
-8. ⚠️ cloudPlatform MUST include a REAL URL — format: "[Platform] | Source: [actual URL]". NEVER write "Inferred from typical stack" without a URL. Use the company website, LinkedIn, Crunchbase, or careers page as fallback source.
+8. ⚠️ cloudPlatform: if source URL confirmed above → use it exactly. If no source found → write "[Platform] | Source: No verified source found (inferred from [reason])". NEVER use a URL belonging to a different company.
 9. For Indian companies: region=India (NOT APAC), timezone=IST/UTC+5:30
 10. Always include team size estimates in both engineeringIT and devOps fields
 11. The "website" field must be exactly: ${website}`;
