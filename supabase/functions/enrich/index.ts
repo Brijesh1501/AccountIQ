@@ -495,16 +495,16 @@ B2B and B2C: Serves both (e.g. cloud platform with enterprise plans AND individu
 ════════════════════════════════════════════════════════════
 ACCOUNT SIZE — Employee-based tiers
 ════════════════════════════════════════════════════════════
-StartUp  → fewer than 50 employees
-Small    → 50–200 employees
-Medium   → 200–500 employees
-Large    → 500–1,000 employees
-X-Large  → 1,000–5,000 employees
-XX-Large → 5,000+ employees
+StartUp (<50)        → fewer than 50 employees
+Small (50 - 200)     → 50–200 employees
+Medium (200 - 500)   → 200–500 employees
+Large (500 - 1000)   → 500–1,000 employees
+X-Large (1000 - 5000) → 1,000–5,000 employees
+XX-Large (5000+)     → 5,000+ employees
 
 ⚠️ Always use LinkedIn employee count/range when provided — it is the most reliable signal.
-For "11–50 employees" → StartUp (<50)
-For "51–200 employees" → Small (50–200)
+For "11–50 employees"  → StartUp (<50)
+For "51–200 employees" → Small (50 - 200)
 
 ════════════════════════════════════════════════════════════
 INDUSTRIES & SUB-INDUSTRIES
@@ -609,9 +609,9 @@ Timezone:
 ════════════════════════════════════════════════════════════
 REVENUE ESTIMATION (when web data unavailable)
 ════════════════════════════════════════════════════════════
-StartUp (<50):    $0.5M–$5M  | Small (50–200):    $5M–$30M
-Medium (200–500): $30M–$100M | Large (500–1,000):  $100M–$300M
-X-Large (1k–5k):  $300M–$1B  | XX-Large (5k+):     $1B+
+StartUp (<50):          $0.5M–$5M   | Small (50 - 200):       $5M–$30M
+Medium (200 - 500):     $30M–$100M  | Large (500 - 1000):     $100M–$300M
+X-Large (1000 - 5000):  $300M–$1B   | XX-Large (5000+):       $1B+
 Adjust up for fintech/e-commerce, down for NGOs/nonprofits.
 
 ════════════════════════════════════════════════════════════
@@ -654,7 +654,7 @@ OUTPUT — All 20 fields required. Return ONLY valid JSON.
   "cloudPlatform": "[Platform Name] | Source: [URL or 'Inferred from [reason]']",
   "devOps": "[Tools & Practices] | Team Size: [n or range]",
   "employeeCount": "LinkedIn range if available, else estimated range",
-  "accountTypeBySize": "StartUp (<50) | Small (50-200) | Medium (200-500) | Large (500-1000) | X-Large (1000-5000) | XX-Large (5000+)",
+  "accountTypeBySize": "StartUp (<50) | Small (50 - 200) | Medium (200 - 500) | Large (500 - 1000) | X-Large (1000 - 5000) | XX-Large (5000+)",
   "accountType": "Enterprise | ISV | Consumer Portal | Agency/Service Company | PE/VC Firms",
   "accountTypeReason": "1–2 sentences naming the specific product/platform and citing the revenue model and classification signal",
   "accountLinkedIn": "Real URL if found, else https://www.linkedin.com/company/[slug]",
