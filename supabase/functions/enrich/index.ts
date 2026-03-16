@@ -503,8 +503,15 @@ X-Large (1000 - 5000) → 1,000–5,000 employees
 XX-Large (5000+)     → 5,000+ employees
 
 ⚠️ Always use LinkedIn employee count/range when provided — it is the most reliable signal.
-For "11–50 employees"  → StartUp (<50)
-For "51–200 employees" → Small (50 - 200)
+LinkedIn range → correct tier mapping (use EXACT label):
+  "1-10"        → StartUp (<50)
+  "11-50"       → StartUp (<50)     ← 34 employees = StartUp, NOT Small
+  "51-200"      → Small (50 - 200)
+  "201-500"     → Medium (200 - 500)
+  "501-1000"    → Large (500 - 1000)
+  "1001-5000"   → X-Large (1000 - 5000)
+  "5001-10000"  → XX-Large (5000+)
+  "10001+"      → XX-Large (5000+)
 
 ════════════════════════════════════════════════════════════
 INDUSTRIES & SUB-INDUSTRIES
@@ -894,7 +901,52 @@ CLASSIFICATION REMINDERS — read carefully before classifying:
       enriched.accountLinkedIn = linkedInUrl;
     }
 
-    // ── 10. Return ──────────────────────────────────────────
+    // ── 10. Hard-correct accountTypeBySize from employee count ─
+    // Never trust the AI to map employee ranges to size tiers correctly.
+    // Parse the actual employee count/range and enforce the correct tier.
+    function resolveAccountSize(empStr: string): string {
+      if (!empStr) return "";
+
+      // Normalise: remove commas, extract all numbers
+      const cleaned = empStr.replace(/,/g, "");
+
+      // LinkedIn-style ranges: "11-50", "51-200", "201-500", "501-1000", "1001-5000", "5001-10000"
+      // Also handles "11–50", "11 - 50", "11 to 50"
+      const rangeMatch = cleaned.match(/(\d+)\s*[-–to]+\s*(\d+)/);
+      if (rangeMatch) {
+        const lo = parseInt(rangeMatch[1]);
+        const hi = parseInt(rangeMatch[2]);
+        const mid = (lo + hi) / 2;
+        return sizeFromCount(mid);
+      }
+
+      // Single number: "34 employees", "~500", "500+"
+      const singleMatch = cleaned.match(/(\d+)/);
+      if (singleMatch) {
+        return sizeFromCount(parseInt(singleMatch[1]));
+      }
+
+      return "";
+    }
+
+    function sizeFromCount(n: number): string {
+      if (n < 50)    return "StartUp (<50)";
+      if (n < 200)   return "Small (50 - 200)";
+      if (n < 500)   return "Medium (200 - 500)";
+      if (n < 1000)  return "Large (500 - 1000)";
+      if (n < 5000)  return "X-Large (1000 - 5000)";
+      return "XX-Large (5000+)";
+    }
+
+    // Use LinkedIn data first (most accurate), then fall back to AI's employeeCount field
+    const empSource = linkedInData.employeeCount || linkedInData.employeeRange || enriched.employeeCount || "";
+    const correctedSize = resolveAccountSize(empSource);
+    if (correctedSize) {
+      enriched.accountTypeBySize = correctedSize;
+      console.log(`accountTypeBySize corrected to: ${correctedSize} (from: "${empSource}")`);
+    }
+
+    // ── 11. Return ──────────────────────────────────────────
     return new Response(JSON.stringify({ data: enriched, remaining }), {
       status: 200,
       headers: { ...CORS, "Content-Type": "application/json", "X-RateLimit-Remaining": String(remaining) },
