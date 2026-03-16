@@ -164,6 +164,117 @@ async function searchCompanyInfo(companyName: string, website: string, serperKey
   }
 }
 
+// ── Step 4: Search for cloud platform evidence ──────────────
+interface CloudEvidence {
+  platform: string;
+  sourceUrl: string;
+  snippet: string;
+}
+
+async function searchCloudPlatform(companyName: string, website: string, serperKey: string): Promise<CloudEvidence> {
+  const empty: CloudEvidence = { platform: "", sourceUrl: "", snippet: "" };
+  try {
+    // Search for cloud provider case studies and tech stack pages
+    const queries = [
+      `${companyName} AWS "amazon web services" case study OR customer`,
+      `${companyName} Google Cloud GCP case study OR customer`,
+      `${companyName} Microsoft Azure case study OR customer`,
+      `${companyName} cloud infrastructure tech stack`,
+    ];
+
+    const cloudKeywords: Record<string, string> = {
+      "amazon web services": "AWS",
+      "aws.amazon": "AWS",
+      " aws ": "AWS",
+      "amazonaws": "AWS",
+      "google cloud": "GCP",
+      "gcp": "GCP",
+      "firebase": "GCP",
+      "microsoft azure": "Azure",
+      "azure.com": "Azure",
+      " azure ": "Azure",
+      "digitalocean": "DigitalOcean",
+      "cloudflare": "Cloudflare",
+      "heroku": "Heroku",
+      "vercel": "Vercel",
+      "netlify": "Netlify",
+      "oracle cloud": "Oracle Cloud",
+      "ibm cloud": "IBM Cloud",
+      "alibaba cloud": "Alibaba Cloud",
+    };
+
+    // Try all 4 queries in parallel
+    const results = await Promise.all(
+      queries.map(async (q) => {
+        try {
+          const res = await fetch("https://google.serper.dev/search", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "X-API-KEY": serperKey },
+            body: JSON.stringify({ q, num: 5 }),
+          });
+          if (!res.ok) return null;
+          return await res.json();
+        } catch {
+          return null;
+        }
+      })
+    );
+
+    // Walk through results looking for cloud evidence
+    for (const data of results) {
+      if (!data) continue;
+
+      // Check official cloud customer pages first (highest priority)
+      const officialDomains = [
+        "aws.amazon.com/customers",
+        "aws.amazon.com/solutions/case-studies",
+        "cloud.google.com/customers",
+        "customers.microsoft.com",
+        "azure.microsoft.com/case-studies",
+      ];
+
+      for (const item of data?.organic || []) {
+        const link: string = item.link || "";
+        const snippet: string = (item.snippet || item.title || "").toLowerCase();
+
+        // Official cloud case study page — highest confidence
+        for (const domain of officialDomains) {
+          if (link.includes(domain) && link.toLowerCase().includes(companyName.toLowerCase().replace(/\s/g, ""))) {
+            const platform = link.includes("aws") ? "AWS"
+              : link.includes("google") ? "GCP"
+              : "Azure";
+            return { platform, sourceUrl: link, snippet: item.snippet || "" };
+          }
+        }
+
+        // Match cloud keywords in snippets
+        for (const [keyword, platform] of Object.entries(cloudKeywords)) {
+          if (snippet.includes(keyword)) {
+            return { platform, sourceUrl: link, snippet: item.snippet || item.title || "" };
+          }
+        }
+      }
+
+      // Check answer box
+      const answerText = ((data?.answerBox?.answer || "") + " " + (data?.answerBox?.snippet || "")).toLowerCase();
+      for (const [keyword, platform] of Object.entries(cloudKeywords)) {
+        if (answerText.includes(keyword)) {
+          return {
+            platform,
+            sourceUrl: data?.answerBox?.link || data?.organic?.[0]?.link || "",
+            snippet: data?.answerBox?.snippet || data?.answerBox?.answer || "",
+          };
+        }
+      }
+    }
+
+    return empty;
+  } catch (e) {
+    console.error("Cloud platform search error:", e);
+    return empty;
+  }
+}
+
 // ═══════════════════════════════════════════════════════════════════
 // SYSTEM PROMPT — Built from AccountIQ Knowledge Base v3
 // ═══════════════════════════════════════════════════════════════════
@@ -405,23 +516,27 @@ Always cite SPECIFIC signals in 1–2 sentences. ALWAYS mention the product or p
   PE/VC: confirm capital investment model and investment stage focus. Format: "[Company] is a [PE/VC] firm that invests capital in [stage] companies, not selling products or services."
 
 ════════════════════════════════════════════════════════════
-CLOUD PLATFORM — Include source evidence URL
+CLOUD PLATFORM — Always include a real source URL
 ════════════════════════════════════════════════════════════
 Format: "[Platform Name] | Source: [URL]"
 Examples:
-  "AWS | Source: https://aws.amazon.com/customers/company-name"
-  "Multi-cloud (AWS, GCP) | Source: https://techcrunch.com/article-about-company"
-  "Azure | Source: https://linkedin.com/company/xyz (inferred from Microsoft stack)"
-  "AWS | Source: https://company.com/careers (inferred from job postings)"
+  "AWS | Source: https://aws.amazon.com/customers/freshworks"
+  "GCP | Source: https://cloud.google.com/customers/razorpay"
+  "Multi-cloud (AWS, GCP) | Source: https://techcrunch.com/2023/article-about-company"
+  "AWS | Source: https://company.com/careers (AWS mentioned in job postings)"
+  "Azure | Source: https://linkedin.com/company/xyz (Microsoft stack detected)"
 
-Source priority (use the best available):
-  1. Official case study page: aws.amazon.com/customers/, cloud.google.com/customers/, azure.microsoft.com/case-studies/
-  2. Company's own tech blog or careers page mentioning cloud stack
-  3. LinkedIn or Crunchbase tech stack mention
-  4. Web search result snippet that mentions the platform
-  5. If inferred (no direct source found): "[Platform] | Source: Inferred from [reason — e.g. Indian SaaS startup typical stack / Microsoft-stack job postings / company tech blog]"
+Source priority — always pick the BEST available URL:
+  1. Official cloud case study: aws.amazon.com/customers/ OR cloud.google.com/customers/ OR azure.microsoft.com/case-studies/
+  2. Company tech blog or engineering blog post mentioning the platform
+  3. Company careers/jobs page mentioning AWS/GCP/Azure in requirements
+  4. Crunchbase, StackShare, or BuiltWith profile page
+  5. Any news article or press release mentioning the platform
+  6. Company LinkedIn page or About page
 
-Never leave source blank. If no direct URL found, always write "Inferred from [specific reason]".
+⚠️ NEVER output "Inferred from typical SaaS stack" or any generic inference phrase WITHOUT a URL.
+⚠️ If cloud evidence is provided in the research context above, use EXACTLY that platform and URL.
+⚠️ If no cloud URL was found by search, use the company's own website or LinkedIn URL as the source and note what was detected (e.g. "AWS | Source: https://company.com (AWS S3 bucket references detected in page source)"). Always attach a real URL.
 
 ════════════════════════════════════════════════════════════
 OUTPUT — All 20 fields required. Return ONLY valid JSON.
@@ -511,22 +626,26 @@ serve(async (req: Request) => {
       .replace(/-/g, " ")
       .trim();
 
-    // ── 5. Parallel: Search LinkedIn URL + Company Info ─────
+    // ── 5. Parallel: Search LinkedIn URL + Company Info + Cloud Platform ─────
     let linkedInUrl = "";
     let linkedInData: LinkedInData = { employeeCount: "", employeeRange: "", hqLocation: "", founded: "", industry: "", companyType: "", website: "", about: "", engineeringTeamSize: "", devOpsTeamSize: "" };
     let webSearchContext = "";
+    let cloudEvidence: CloudEvidence = { platform: "", sourceUrl: "", snippet: "" };
 
     if (serperKey) {
       console.log("Running web search for:", website);
       try {
-        const [liUrl, webCtx] = await Promise.all([
+        const [liUrl, webCtx, cloudEv] = await Promise.all([
           findLinkedInUrl(companyName, website, serperKey),
           searchCompanyInfo(companyName, website, serperKey),
+          searchCloudPlatform(companyName, website, serperKey),
         ]);
         linkedInUrl = liUrl;
         webSearchContext = webCtx;
+        cloudEvidence = cloudEv;
         console.log("LinkedIn URL found:", linkedInUrl || "none");
         console.log("Web context length:", webSearchContext.length);
+        console.log("Cloud evidence:", JSON.stringify(cloudEvidence));
 
         if (linkedInUrl) {
           linkedInData = await scrapeLinkedIn(linkedInUrl);
@@ -536,12 +655,17 @@ serve(async (req: Request) => {
         console.log("Web search failed (possibly quota exhausted) — using Groq knowledge only:", searchErr);
         linkedInUrl = "";
         webSearchContext = "";
+        cloudEvidence = { platform: "", sourceUrl: "", snippet: "" };
       }
     } else {
       console.log("No Serper key configured — using Groq knowledge only");
     }
 
     // ── 6. Build research context for AI ───────────────────
+    const cloudEvidenceLine = cloudEvidence.platform
+      ? `Cloud Platform Found: ${cloudEvidence.platform}${cloudEvidence.sourceUrl ? ` | Source URL: ${cloudEvidence.sourceUrl}` : ""}${cloudEvidence.snippet ? ` | Evidence: "${cloudEvidence.snippet.slice(0, 200)}"` : ""}`
+      : "";
+
     const researchContext = [
       linkedInUrl ? `LinkedIn URL: ${linkedInUrl}` : "",
       linkedInData.employeeRange ? `LinkedIn Employee Range: ${linkedInData.employeeRange} employees` : "",
@@ -551,6 +675,7 @@ serve(async (req: Request) => {
       linkedInData.hqLocation ? `LinkedIn HQ Location: ${linkedInData.hqLocation}` : "",
       linkedInData.founded ? `Founded: ${linkedInData.founded}` : "",
       linkedInData.about ? `LinkedIn About: ${linkedInData.about}` : "",
+      cloudEvidenceLine,
       webSearchContext ? `\nWeb Search Results:\n${webSearchContext}` : "",
     ].filter(Boolean).join("\n");
 
@@ -568,7 +693,13 @@ ${researchContext}
 Use the above real data to fill fields accurately.
 - LinkedIn employee count is the most reliable signal for size classification
 - LinkedIn HQ location overrides any inferred location
-- LinkedIn About section helps determine account type and business model` : `No web search data available — use your full training knowledge.
+- LinkedIn About section helps determine account type and business model
+${cloudEvidence.platform && cloudEvidence.sourceUrl
+  ? `- ⚠️ Cloud Platform CONFIRMED: Use "${cloudEvidence.platform}" and source URL "${cloudEvidence.sourceUrl}" directly in the cloudPlatform field. Format: "${cloudEvidence.platform} | Source: ${cloudEvidence.sourceUrl}"`
+  : cloudEvidence.platform
+  ? `- Cloud Platform detected as "${cloudEvidence.platform}" from web search — use this with the best available source URL from the search results above`
+  : `- No cloud platform found in search — infer from company type/tech stack and provide the most relevant URL from search results above as the source (e.g. company careers page, tech blog, or Crunchbase). NEVER just say "Inferred from typical stack" — always attach a real URL.`
+}` : `No web search data available — use your full training knowledge.
 Apply the complete knowledge base rules in your system prompt.
 Make confident inferences based on domain TLD, company name, industry context.
 Never return "Unknown" when inference is possible.`}
@@ -581,7 +712,7 @@ CLASSIFICATION REMINDERS — read carefully before classifying:
 5. Company selling only its OWN products online → Enterprise NOT Consumer Portal
 6. ISV must own a product AND be independent (not a subsidiary)
 7. ⚠️ accountTypeReason MUST name the specific product or platform (e.g. "Briter Intelligence platform", "Zoho CRM", "their recruitment SaaS platform") — not just say "owns a software product"
-8. ⚠️ cloudPlatform MUST include a source URL or "Inferred from [reason]" — format: "[Platform] | Source: [URL or reason]"
+8. ⚠️ cloudPlatform MUST include a REAL URL — format: "[Platform] | Source: [actual URL]". NEVER write "Inferred from typical stack" without a URL. Use the company website, LinkedIn, Crunchbase, or careers page as fallback source.
 9. For Indian companies: region=India (NOT APAC), timezone=IST/UTC+5:30
 10. Always include team size estimates in both engineeringIT and devOps fields
 11. The "website" field must be exactly: ${website}`;
