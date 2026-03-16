@@ -31,33 +31,86 @@ function checkRateLimit(userId: string): { allowed: boolean; remaining: number }
 // ── Step 1: Search for LinkedIn URL via Serper ──────────────
 async function findLinkedInUrl(companyName: string, searchAnchor: string, serperKey: string): Promise<string> {
   try {
-    // Use full domain (e.g. "blackbox.ai") not just slug ("blackbox") to avoid wrong company matches
-    const query = `"${searchAnchor}" site:linkedin.com/company`;
-    const res = await fetch("https://google.serper.dev/search", {
+    const domainSlug = searchAnchor.split(".")[0].toLowerCase(); // "blackbox" from "blackbox.ai"
+
+    // Helper: extract clean LinkedIn company URL from a result link
+    function extractLinkedIn(link: string): string {
+      const match = link.match(/(https:\/\/[a-z]+\.linkedin\.com\/company\/[a-zA-Z0-9_-]+)/);
+      return match ? match[1] : "";
+    }
+
+    // Helper: does the LinkedIn slug plausibly belong to our company?
+    // e.g. "blackboxaitechnologies" contains "blackbox" ✓
+    // e.g. "black-box-corporation" contains "blackbox" — too generic, need tighter check
+    function slugMatchesCompany(linkedInUrl: string, title: string, snippet: string): boolean {
+      const slug = linkedInUrl.split("/company/")[1]?.toLowerCase() || "";
+      const combined = (slug + " " + title + " " + snippet).toLowerCase();
+      // Slug starts with or contains domainSlug
+      if (slug.startsWith(domainSlug)) return true;
+      if (slug.includes(domainSlug)) return true;
+      // searchAnchor (full domain) appears in title or snippet
+      if (combined.includes(searchAnchor.toLowerCase())) return true;
+      return false;
+    }
+
+    // ── PASS 1: Search with full domain anchor (most precise) ──
+    const pass1Res = await fetch("https://google.serper.dev/search", {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-API-KEY": serperKey },
-      body: JSON.stringify({ q: query, num: 5 }),
+      body: JSON.stringify({ q: `"${searchAnchor}" site:linkedin.com/company`, num: 5 }),
     });
-    if (!res.ok) {
-      console.log("Serper LinkedIn search failed:", res.status, "— falling back to Groq");
-      return "";
-    }
-    const data = await res.json();
-    for (const item of data?.organic || []) {
-      const link: string = item.link || "";
-      if (link.includes("linkedin.com/company/")) {
-        const match = link.match(/(https:\/\/[a-z]+\.linkedin\.com\/company\/[a-zA-Z0-9_-]+)/);
-        if (match) return match[1];
+    if (pass1Res.ok) {
+      const data = await pass1Res.json();
+      // Check knowledge graph first
+      const kg = data?.knowledgeGraph;
+      if (kg?.website?.includes("linkedin.com/company/")) return kg.website;
+      // Check organic results
+      for (const item of data?.organic || []) {
+        const link: string = item.link || "";
+        const liUrl = extractLinkedIn(link);
+        if (liUrl) return liUrl; // domain was quoted so any match is safe
       }
     }
-    const kg = data?.knowledgeGraph;
-    if (kg?.website) {
-      const kgLink = kg.website;
-      if (kgLink.includes("linkedin.com/company/")) return kgLink;
+
+    // ── PASS 2: Fallback — search by company name + TLD hint ──
+    // e.g. "blackbox AI" linkedin company  (use TLD as context hint)
+    const tld = searchAnchor.split(".").slice(1).join("."); // "ai" from "blackbox.ai"
+    const tldHint = ["ai", "io", "co", "app", "dev", "tech"].includes(tld) ? tld.toUpperCase() : "";
+    const nameQuery = tldHint
+      ? `"${companyName}" ${tldHint} site:linkedin.com/company`
+      : `"${companyName}" site:linkedin.com/company`;
+
+    const pass2Res = await fetch("https://google.serper.dev/search", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-API-KEY": serperKey },
+      body: JSON.stringify({ q: nameQuery, num: 8 }),
+    });
+    if (pass2Res.ok) {
+      const data = await pass2Res.json();
+      // Knowledge graph
+      const kg = data?.knowledgeGraph;
+      if (kg?.website?.includes("linkedin.com/company/")) {
+        const liUrl = extractLinkedIn(kg.website);
+        if (liUrl && slugMatchesCompany(liUrl, "", "")) return liUrl;
+      }
+      // Organic — validate each result belongs to our company
+      for (const item of data?.organic || []) {
+        const link: string = item.link || "";
+        const liUrl = extractLinkedIn(link);
+        if (liUrl && slugMatchesCompany(liUrl, item.title || "", item.snippet || "")) {
+          return liUrl;
+        }
+      }
+      // Last resort: return first LinkedIn result if only one found (likely correct)
+      const allLinkedIn = (data?.organic || [])
+        .map((i: { link?: string }) => extractLinkedIn(i.link || ""))
+        .filter(Boolean);
+      if (allLinkedIn.length === 1) return allLinkedIn[0];
     }
+
     return "";
   } catch (e) {
-    console.error("Serper search error:", e);
+    console.error("Serper LinkedIn search error:", e);
     return "";
   }
 }
