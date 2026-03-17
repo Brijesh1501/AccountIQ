@@ -1304,87 +1304,165 @@ async function startBulk(){
   await logEvent('enrich',`Bulk enrichment: ${successes}/${total} succeeded`);
   toast(`Bulk complete: ${successes} succeeded`,'success');
 
-  // ── Render results table ────────────────────────────────
+  // ── Render results ──────────────────────────────────────
   const successList=lines.filter(l=>st[l]==='done');
   const errorList=lines.filter(l=>st[l]==='error');
-  if(!successList.length){document.getElementById('bulkResults').innerHTML='';return;}
 
-  const csvRows=successList.map(w=>{
+  // CSV export data (all 20 fields)
+  const csvData=successList.map(w=>{
     const a=results[w];
     return [
-      a.accountName||'', w,
-      a.accountType||'', a.accountTypeBySize||'', a.accountTypeReason||'',
-      a.businessType||'', a.industry||'', a.subIndustry||'',
-      a.employeeCount||'', a.revenueUSD||'',
-      a.draInsights||'', a.engineeringIT||'', a.devOps||'', a.cloudPlatform||'',
-      a.billingCity||'', a.billingState||'', a.billingCountry||'',
-      a.region||'', a.timeZone||'', a.accountLinkedIn||''
+      a.accountName||'',w,a.accountType||'',a.accountTypeBySize||'',a.accountTypeReason||'',
+      a.businessType||'',a.industry||'',a.subIndustry||'',a.employeeCount||'',a.revenueUSD||'',
+      a.draInsights||'',a.engineeringIT||'',a.devOps||'',a.cloudPlatform||'',
+      a.billingCity||'',a.billingState||'',a.billingCountry||'',a.region||'',a.timeZone||'',a.accountLinkedIn||''
     ];
   });
   const csvHeaders=['Account Name','Website','Account Type','Account Type By Size','Account Type Reason','Business Type','Industry','Sub-Industry','Employee Count','Revenue (USD)','DRA Insights','Engineering & IT','DevOps','Cloud Platform','Billing City','Billing State','Billing Country','Region','Time Zone','LinkedIn'];
-
   function exportBulkCSV(){
-    const rows=[csvHeaders,...csvRows].map(r=>r.map(c=>'"'+(String(c||'').replace(/"/g,'""'))+'"').join(',')).join('\n');
+    const rows=[csvHeaders,...csvData].map(r=>r.map(c=>'"'+(String(c||'').replace(/"/g,'""'))+'"').join(',')).join('\n');
     const a=document.createElement('a');a.href='data:text/csv;charset=utf-8,'+encodeURIComponent(rows);a.download='bulk-enrichment-'+Date.now()+'.csv';a.click();
   }
   window._exportBulkCSV=exportBulkCSV;
 
-  const tableRows=successList.map(w=>{
+  // Badge color by account type
+  function typeBadge(t){
+    const map={'ISV':'b-purple','Enterprise':'b-blue','Consumer Portal':'b-teal','Agency/Service Company':'b-amber','PE/VC Firms':'b-gray'};
+    return`<span class="badge ${map[t]||'b-gray'}" style="font-size:10px;padding:2px 8px;">${t||'—'}</span>`;
+  }
+  function bizBadge(t){
+    const map={'B2B':'b-blue','B2C':'b-green','B2B and B2C':'b-purple'};
+    return`<span class="badge ${map[t]||'b-gray'}" style="font-size:10px;padding:2px 8px;">${t||'—'}</span>`;
+  }
+  function pill(val,color=''){
+    if(!val||val==='-')return`<span style="color:var(--text3);font-size:11px;">—</span>`;
+    return`<span style="display:inline-block;padding:1px 7px;border-radius:20px;font-size:10px;font-weight:500;background:var(--surface3);color:var(--text2);">${val}</span>`;
+  }
+
+  // Build success cards
+  const successCards=successList.map((w,i)=>{
     const a=results[w];
-    const typeColor=a.accountType==='ISV'?'b-purple':a.accountType==='Enterprise'?'b-blue':a.accountType==='Consumer Portal'?'b-teal':a.accountType==='Agency/Service Company'?'b-amber':'b-gray';
-    return `<tr>
-      <td style="font-weight:500">${a.accountName||w}</td>
-      <td style="font-family:var(--mono);font-size:11px;color:var(--text2)">${w}</td>
-      <td><span class="badge ${typeColor}">${a.accountType||'-'}</span></td>
-      <td style="font-size:11px">${a.accountTypeBySize||'-'}</td>
-      <td style="font-size:11px;color:var(--text2);max-width:200px;white-space:normal;line-height:1.4">${a.accountTypeReason||'-'}</td>
-      <td style="font-size:11px">${a.businessType||'-'}</td>
-      <td style="font-size:11px">${a.industry||'-'}</td>
-      <td style="font-size:11px;color:var(--text2)">${a.subIndustry||'-'}</td>
-      <td style="font-size:11px">${a.employeeCount||'-'}</td>
-      <td style="font-size:11px">${a.revenueUSD||'-'}</td>
-      <td style="font-size:11px;color:var(--text2);max-width:220px;white-space:normal;line-height:1.4">${a.draInsights||'-'}</td>
-      <td style="font-size:11px;color:var(--text2);max-width:200px;white-space:normal;line-height:1.4">${a.engineeringIT||'-'}</td>
-      <td style="font-size:11px;color:var(--text2);max-width:200px;white-space:normal;line-height:1.4">${a.devOps||'-'}</td>
-      <td style="font-size:11px;color:var(--text2);max-width:180px;white-space:normal;line-height:1.4">${a.cloudPlatform||'-'}</td>
-      <td style="font-size:11px">${a.billingCity||'-'}</td>
-      <td style="font-size:11px">${a.billingState||'-'}</td>
-      <td style="font-size:11px">${a.billingCountry||'-'}</td>
-      <td style="font-size:11px">${a.region||'-'}</td>
-      <td style="font-size:11px">${a.timeZone||'-'}</td>
-      <td style="font-size:11px">${a.accountLinkedIn?`<a href="${a.accountLinkedIn}" target="_blank" style="color:var(--accent);text-decoration:none;">View ↗</a>`:'-'}</td>
-    </tr>`;
+    const initials=(a.accountName||w).substring(0,2).toUpperCase();
+    const hue=[210,265,175,35,0,310][i%6];
+    return `
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--rl);overflow:hidden;margin-bottom:12px;">
+
+      <!-- Row 1: Account header -->
+      <div style="display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--border);background:var(--surface2);">
+        <div style="width:34px;height:34px;border-radius:8px;background:hsl(${hue},60%,25%);border:1px solid hsl(${hue},60%,35%);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:hsl(${hue},80%,75%);flex-shrink:0;">${initials}</div>
+        <div style="flex:1;min-width:0;">
+          <div style="font-size:13px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${a.accountName||w}</div>
+          <div style="font-size:11px;color:var(--text3);font-family:var(--mono);">${w}</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
+          ${typeBadge(a.accountType)}
+          ${bizBadge(a.businessType)}
+          ${a.accountLinkedIn?`<a href="${a.accountLinkedIn}" target="_blank" style="display:inline-flex;align-items:center;gap:4px;padding:3px 9px;border-radius:6px;background:rgba(79,142,247,0.1);border:1px solid rgba(79,142,247,0.2);color:var(--accent);font-size:10px;font-weight:600;text-decoration:none;">in ↗</a>`:''}
+        </div>
+      </div>
+
+      <!-- Row 2: DRA Insights -->
+      ${a.draInsights?`<div style="padding:10px 16px;border-bottom:1px solid var(--border);font-size:12px;color:var(--text2);line-height:1.65;">${a.draInsights}</div>`:''}
+
+      <!-- Row 3: Core classification grid -->
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:0;border-bottom:1px solid var(--border);">
+        <div style="padding:10px 14px;border-right:1px solid var(--border);">
+          <div style="font-size:9px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:0.07em;margin-bottom:4px;">Size</div>
+          <div style="font-size:12px;color:var(--text);font-weight:500;">${a.accountTypeBySize||'—'}</div>
+        </div>
+        <div style="padding:10px 14px;border-right:1px solid var(--border);">
+          <div style="font-size:9px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:0.07em;margin-bottom:4px;">Employees</div>
+          <div style="font-size:12px;color:var(--text);font-weight:500;">${a.employeeCount||'—'}</div>
+        </div>
+        <div style="padding:10px 14px;border-right:1px solid var(--border);">
+          <div style="font-size:9px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:0.07em;margin-bottom:4px;">Revenue</div>
+          <div style="font-size:12px;color:var(--green);font-weight:500;">${a.revenueUSD||'—'}</div>
+        </div>
+        <div style="padding:10px 14px;">
+          <div style="font-size:9px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:0.07em;margin-bottom:4px;">Cloud</div>
+          <div style="font-size:11px;color:var(--text2);line-height:1.4;">${a.cloudPlatform||'—'}</div>
+        </div>
+      </div>
+
+      <!-- Row 4: Industry + Location -->
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0;border-bottom:1px solid var(--border);">
+        <div style="padding:10px 14px;border-right:1px solid var(--border);">
+          <div style="font-size:9px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:0.07em;margin-bottom:4px;">Industry</div>
+          <div style="font-size:11px;color:var(--text);">${a.industry||'—'}</div>
+          <div style="font-size:10px;color:var(--text3);margin-top:2px;">${a.subIndustry||''}</div>
+        </div>
+        <div style="padding:10px 14px;border-right:1px solid var(--border);">
+          <div style="font-size:9px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:0.07em;margin-bottom:4px;">Location</div>
+          <div style="font-size:11px;color:var(--text);">${[a.billingCity,a.billingState,a.billingCountry].filter(Boolean).join(', ')||'—'}</div>
+          <div style="font-size:10px;color:var(--text3);margin-top:2px;">${a.region||''} ${a.timeZone?'· '+a.timeZone:''}</div>
+        </div>
+        <div style="padding:10px 14px;">
+          <div style="font-size:9px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:0.07em;margin-bottom:4px;">Account Type Reason</div>
+          <div style="font-size:11px;color:var(--text2);line-height:1.5;">${a.accountTypeReason||'—'}</div>
+        </div>
+      </div>
+
+      <!-- Row 5: Engineering + DevOps -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:0;">
+        <div style="padding:10px 14px;border-right:1px solid var(--border);">
+          <div style="font-size:9px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:0.07em;margin-bottom:4px;">Engineering & IT</div>
+          <div style="font-size:11px;color:var(--text2);line-height:1.5;">${a.engineeringIT||'—'}</div>
+        </div>
+        <div style="padding:10px 14px;">
+          <div style="font-size:9px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:0.07em;margin-bottom:4px;">DevOps</div>
+          <div style="font-size:11px;color:var(--text2);line-height:1.5;">${a.devOps||'—'}</div>
+        </div>
+      </div>
+
+    </div>`;
   }).join('');
 
-  const errorSection=errorList.length?`<div style="margin-top:10px;padding:10px 12px;background:var(--red-bg);border:1px solid var(--red-border);border-radius:8px;font-size:11px;color:var(--red);">
-    ❌ Failed (${errorList.length}): ${errorList.join(', ')}
-  </div>`:'';
+  // Build error cards
+  const errorCards=errorList.length?`
+    <div style="border:1px solid var(--red-border);border-radius:var(--rl);overflow:hidden;margin-bottom:12px;">
+      <div style="padding:10px 16px;background:var(--red-bg);border-bottom:1px solid var(--red-border);display:flex;align-items:center;gap:8px;">
+        <span style="font-size:13px;font-weight:600;color:var(--red);">❌ Failed Enrichments</span>
+        <span class="badge b-red">${errorList.length} failed</span>
+      </div>
+      ${errorList.map(w=>`
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 16px;border-bottom:1px solid var(--red-border);last-child:border-none;">
+          <div>
+            <div style="font-size:12px;font-weight:500;color:var(--text);font-family:var(--mono);">${w}</div>
+            <div style="font-size:11px;color:var(--red);margin-top:2px;">Enrichment failed — API error or rate limit. Try re-enriching individually.</div>
+          </div>
+          <button class="btn btn-s btn-sm" onclick="retryEnrich('${w}')" style="flex-shrink:0;margin-left:12px;">↺ Retry</button>
+        </div>`).join('')}
+    </div>`:'' ;
 
   document.getElementById('bulkResults').innerHTML=`
-    <div class="tw" style="margin-top:18px;">
-      <div class="th">
-        <div class="thl">
-          <span style="font-size:13px;font-weight:600;">✅ Enrichment Results</span>
+    <div style="margin-top:18px;">
+      <!-- Header bar -->
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span style="font-size:14px;font-weight:600;">Results</span>
           <span class="badge b-green">${successes} enriched</span>
           ${errorList.length?`<span class="badge b-red">${errorList.length} failed</span>`:''}
         </div>
-        <button class="btn btn-s btn-sm" onclick="window._exportBulkCSV()">↓ Export CSV</button>
+        ${successList.length?`<button class="btn btn-s btn-sm" onclick="window._exportBulkCSV()" style="display:flex;align-items:center;gap:5px;">↓ Export All (CSV)</button>`:''}
       </div>
-      <div class="ts">
-        <table>
-          <thead><tr>
-            <th>Account Name</th><th>Website</th><th>Account Type</th><th>Size</th><th>Type Reason</th>
-            <th>Business Type</th><th>Industry</th><th>Sub-Industry</th>
-            <th>Employees</th><th>Revenue</th>
-            <th>DRA Insights</th><th>Engineering & IT</th><th>DevOps</th><th>Cloud Platform</th>
-            <th>City</th><th>State</th><th>Country</th><th>Region</th><th>Timezone</th><th>LinkedIn</th>
-          </tr></thead>
-          <tbody>${tableRows}</tbody>
-        </table>
-      </div>
-      ${errorSection}
+      ${errorCards}
+      ${successCards}
     </div>`;
+
+  // Retry individual failed enrichment
+  window.retryEnrich=async function(w){
+    const btn=event.target;btn.disabled=true;btn.textContent='…';
+    try{
+      const acc=await callAI(w.trim());acc.id=Date.now()+Math.random();acc.website=w.trim();
+      await saveAccount(acc);
+      await logEvent('enrich',`Retried enrichment: ${acc.accountName||w}`,{website:w});
+      toast(`✅ ${acc.accountName||w} enriched successfully`,'success');
+      // Remove error row
+      btn.closest('div[style*="border-bottom"]').remove();
+    }catch(e){btn.disabled=false;btn.textContent='↺ Retry';toast(`Failed again: ${w}`,'error');}
+  };
 }
+
 
 // ─────────────────────────────────────────────────
 // CSV
