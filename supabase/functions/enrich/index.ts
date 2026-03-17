@@ -896,84 +896,31 @@ CLASSIFICATION REMINDERS — read carefully before classifying:
 10. Always include team size estimates in both engineeringIT and devOps fields
 11. The "website" field must be exactly: ${website}`;
 
-    // ── 7. Call Groq with retry on rate limit ───────────────
-    const groqModels = [
-      "llama-3.3-70b-versatile",   // primary — best quality
-      "llama-3.1-70b-versatile",   // fallback 1
-      "llama3-70b-8192",           // fallback 2
-    ];
+    const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${groqKey}` },
+      body: JSON.stringify({
+        model: "llama-3.3-70b-versatile",
+        temperature: 0.1,
+        max_tokens: 1500,
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: SYSTEM_PROMPT },
+          { role: "user", content: userMessage },
+        ],
+      }),
+    });
 
-    let groqRes: Response | null = null;
-    let groqData: Record<string, unknown> | null = null;
-    let lastGroqError = "";
-
-    for (const model of groqModels) {
-      let attempts = 0;
-      const maxAttempts = 3;
-
-      while (attempts < maxAttempts) {
-        attempts++;
-        try {
-          groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${groqKey}` },
-            body: JSON.stringify({
-              model,
-              temperature: 0.1,
-              max_tokens: 2000,
-              response_format: { type: "json_object" },
-              messages: [
-                { role: "system", content: SYSTEM_PROMPT },
-                { role: "user", content: userMessage },
-              ],
-            }),
-          });
-
-          if (groqRes.status === 429) {
-            // Rate limited — parse retry-after header or wait 10s
-            const retryAfter = parseInt(groqRes.headers.get("retry-after") || "10");
-            const waitMs = Math.min((retryAfter + 1) * 1000, 30000);
-            console.log(`Groq rate limited on ${model}, waiting ${waitMs}ms (attempt ${attempts}/${maxAttempts})`);
-            await new Promise(r => setTimeout(r, waitMs));
-            continue; // retry same model
-          }
-
-          if (groqRes.status === 503 || groqRes.status === 502) {
-            // Service unavailable — wait and retry
-            console.log(`Groq ${groqRes.status} on ${model}, waiting 5s (attempt ${attempts}/${maxAttempts})`);
-            await new Promise(r => setTimeout(r, 5000));
-            continue;
-          }
-
-          if (!groqRes.ok) {
-            const errText = await groqRes.text();
-            lastGroqError = `${model}: HTTP ${groqRes.status} — ${errText.slice(0, 200)}`;
-            console.error("Groq error:", lastGroqError);
-            break; // try next model
-          }
-
-          // Success — parse response
-          groqData = await groqRes.json() as Record<string, unknown>;
-          break; // exit retry loop
-
-        } catch (fetchErr) {
-          lastGroqError = `${model}: fetch failed — ${(fetchErr as Error).message}`;
-          console.error("Groq fetch error:", lastGroqError);
-          if (attempts < maxAttempts) await new Promise(r => setTimeout(r, 3000));
-        }
-      }
-
-      if (groqData) break; // got a valid response — stop trying models
+    if (!groqRes.ok) {
+      const errText = await groqRes.text();
+      console.error("Groq error:", errText);
+      return new Response(JSON.stringify({ error: "AI service error. Please try again." }), {
+        status: 502, headers: { ...CORS, "Content-Type": "application/json" },
+      });
     }
 
-    if (!groqData) {
-      console.error("All Groq models failed. Last error:", lastGroqError);
-      return new Response(JSON.stringify({
-        error: `AI service unavailable. ${lastGroqError.includes("429") ? "Rate limit hit — wait 1 minute and try again." : "Please try again in a moment."}`
-      }), { status: 502, headers: { ...CORS, "Content-Type": "application/json" } });
-    }
-
-    let rawText = (groqData as { choices?: { message?: { content?: string } }[] })?.choices?.[0]?.message?.content || "";
+    const groqData = await groqRes.json();
+    let rawText = groqData?.choices?.[0]?.message?.content || "";
 
     if (!rawText) {
       return new Response(JSON.stringify({ error: "Empty AI response. Please try again." }), {
