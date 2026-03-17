@@ -1304,159 +1304,88 @@ async function startBulk(){
   await logEvent('enrich',`Bulk enrichment: ${successes}/${total} succeeded`);
   toast(`Bulk complete: ${successes} succeeded`,'success');
 
-  // ── Render results ──────────────────────────────────────
   const successList=lines.filter(l=>st[l]==='done');
   const errorList=lines.filter(l=>st[l]==='error');
 
-  // CSV export data (all 20 fields)
-  const csvData=successList.map(w=>{
-    const a=results[w];
-    return [
-      a.accountName||'',w,a.accountType||'',a.accountTypeBySize||'',a.accountTypeReason||'',
-      a.businessType||'',a.industry||'',a.subIndustry||'',a.employeeCount||'',a.revenueUSD||'',
-      a.draInsights||'',a.engineeringIT||'',a.devOps||'',a.cloudPlatform||'',
-      a.billingCity||'',a.billingState||'',a.billingCountry||'',a.region||'',a.timeZone||'',a.accountLinkedIn||''
-    ];
-  });
-  const csvHeaders=['Account Name','Website','Account Type','Account Type By Size','Account Type Reason','Business Type','Industry','Sub-Industry','Employee Count','Revenue (USD)','DRA Insights','Engineering & IT','DevOps','Cloud Platform','Billing City','Billing State','Billing Country','Region','Time Zone','LinkedIn'];
-  function exportBulkCSV(){
-    const rows=[csvHeaders,...csvData].map(r=>r.map(c=>'"'+(String(c||'').replace(/"/g,'""'))+'"').join(',')).join('\n');
-    const a=document.createElement('a');a.href='data:text/csv;charset=utf-8,'+encodeURIComponent(rows);a.download='bulk-enrichment-'+Date.now()+'.csv';a.click();
-  }
-  window._exportBulkCSV=exportBulkCSV;
+  // CSV — all 20 fields
+  const _hdr=['Account Name','Website','Account Type','Account Type By Size','Account Type Reason','Business Type','Industry','Sub-Industry','Employee Count','Revenue (USD)','DRA Insights','Engineering & IT','DevOps','Cloud Platform','Billing City','Billing State','Billing Country','Region','Time Zone','LinkedIn'];
+  const _rows=successList.map(w=>{const a=results[w];return[a.accountName||'',w,a.accountType||'',a.accountTypeBySize||'',a.accountTypeReason||'',a.businessType||'',a.industry||'',a.subIndustry||'',a.employeeCount||'',a.revenueUSD||'',a.draInsights||'',a.engineeringIT||'',a.devOps||'',a.cloudPlatform||'',a.billingCity||'',a.billingState||'',a.billingCountry||'',a.region||'',a.timeZone||'',a.accountLinkedIn||''];});
+  window._exportBulkCSV=function(){const r=[_hdr,..._rows].map(r=>r.map(c=>'"'+(String(c||'').replace(/"/g,'""'))+'"').join(',')).join('\n');const a=document.createElement('a');a.href='data:text/csv;charset=utf-8,'+encodeURIComponent(r);a.download='bulk-enrichment-'+Date.now()+'.csv';a.click();};
 
-  // Badge color by account type
-  function typeBadge(t){
-    const map={'ISV':'b-purple','Enterprise':'b-blue','Consumer Portal':'b-teal','Agency/Service Company':'b-amber','PE/VC Firms':'b-gray'};
-    return`<span class="badge ${map[t]||'b-gray'}" style="font-size:10px;padding:2px 8px;">${t||'—'}</span>`;
-  }
-  function bizBadge(t){
-    const map={'B2B':'b-blue','B2C':'b-green','B2B and B2C':'b-purple'};
-    return`<span class="badge ${map[t]||'b-gray'}" style="font-size:10px;padding:2px 8px;">${t||'—'}</span>`;
-  }
-  function pill(val,color=''){
-    if(!val||val==='-')return`<span style="color:var(--text3);font-size:11px;">—</span>`;
-    return`<span style="display:inline-block;padding:1px 7px;border-radius:20px;font-size:10px;font-weight:500;background:var(--surface3);color:var(--text2);">${val}</span>`;
-  }
+  const _tc={'ISV':'b-purple','Enterprise':'b-blue','Consumer Portal':'b-teal','Agency/Service Company':'b-amber','PE/VC Firms':'b-gray'};
+  const _bc={'B2B':'b-blue','B2C':'b-green','B2B and B2C':'b-purple'};
+  function _b(t,m){return t?`<span class="badge ${m[t]||'b-gray'}" style="font-size:10px">${t}</span>`:'';}
 
-  // Build success cards
-  const successCards=successList.map((w,i)=>{
+  window._toggleRow=function(idx){
+    const d=document.getElementById('brd-'+idx);
+    const ic=document.getElementById('bri-'+idx);
+    const open=d.style.display==='table-row';
+    d.style.display=open?'none':'table-row';
+    ic.style.transform=open?'rotate(0deg)':'rotate(90deg)';
+  };
+
+  window.retryEnrich=async function(w,btn){
+    btn.disabled=true;btn.textContent='...';
+    try{const acc=await callAI(w.trim());acc.id=Date.now()+Math.random();acc.website=w.trim();await saveAccount(acc);await logEvent('enrich',`Retried: ${acc.accountName||w}`,{website:w});toast('Enriched: '+(acc.accountName||w),'success');btn.closest('tr').remove();}
+    catch(e){btn.disabled=false;btn.textContent='Retry';toast('Failed: '+w,'error');}
+  };
+
+  const summaryRows=successList.map((w,i)=>{
     const a=results[w];
-    const initials=(a.accountName||w).substring(0,2).toUpperCase();
+    const ini=(a.accountName||w).substring(0,2).toUpperCase();
     const hue=[210,265,175,35,0,310][i%6];
-    function cell(label,value,opts={}){
-      const val=value&&value!=='-'?value:'—';
-      const valStyle=opts.green?'color:var(--green);font-weight:500;':opts.mono?'font-family:var(--mono);font-size:10px;color:var(--text2);':'color:var(--text);';
-      const wrap=opts.wrap?'white-space:normal;line-height:1.5;':'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
-      return `<div style="padding:10px 14px;${opts.border?'border-right:1px solid var(--border);':''}${opts.btop?'border-top:1px solid var(--border);':''}">
-        <div style="font-size:9px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:4px;">${label}</div>
-        <div style="font-size:11px;${valStyle}${wrap}">${val}</div>
-      </div>`;
-    }
-    return `
-    <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--rl);overflow:hidden;margin-bottom:14px;">
-
-      <!-- Header -->
-      <div style="display:flex;align-items:center;gap:12px;padding:12px 16px;background:var(--surface2);border-bottom:1px solid var(--border);">
-        <div style="width:36px;height:36px;border-radius:9px;background:hsl(${hue},55%,22%);border:1px solid hsl(${hue},55%,32%);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:hsl(${hue},75%,72%);flex-shrink:0;">${initials}</div>
-        <div style="flex:1;min-width:0;">
-          <div style="font-size:13px;font-weight:600;">${a.accountName||w}</div>
-          <div style="font-size:11px;color:var(--text3);font-family:var(--mono);">${w}</div>
-        </div>
-        <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
-          ${typeBadge(a.accountType)}
-          ${bizBadge(a.businessType)}
-          ${a.accountLinkedIn?`<a href="${a.accountLinkedIn}" target="_blank" style="display:inline-flex;align-items:center;gap:3px;padding:3px 9px;border-radius:6px;background:rgba(79,142,247,0.1);border:1px solid rgba(79,142,247,0.2);color:var(--accent);font-size:10px;font-weight:600;text-decoration:none;">in ↗</a>`:''}
-        </div>
+    const F=[
+      ['Account Name',a.accountName],['Website',w],
+      ['Account Type',a.accountType],['Account Type By Size',a.accountTypeBySize],
+      ['Business Type',a.businessType],['Employee Count',a.employeeCount],
+      ['Revenue (USD)',a.revenueUSD],['Cloud Platform',a.cloudPlatform],
+      ['Industry',a.industry],['Sub-Industry',a.subIndustry],
+      ['Billing City',a.billingCity],['Billing State',a.billingState],
+      ['Billing Country',a.billingCountry],['Region',a.region],
+      ['Time Zone',a.timeZone],['LinkedIn',a.accountLinkedIn?'<a href="'+a.accountLinkedIn+'" target="_blank" style="color:var(--accent)">'+a.accountLinkedIn+'</a>':'—'],
+      ['Account Type Reason',a.accountTypeReason],['DRA Insights',a.draInsights],
+      ['Engineering & IT',a.engineeringIT],['DevOps',a.devOps]
+    ];
+    const grid=F.map(([k,v])=>`<div style="padding:9px 13px;border-right:1px solid var(--border);border-bottom:1px solid var(--border);min-width:0;"><div style="font-size:9px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:0.07em;margin-bottom:3px;white-space:nowrap;">${k}</div><div style="font-size:11px;color:var(--text2);line-height:1.5;word-break:break-word;">${v||'—'}</div></div>`).join('');
+    return `<tr style="cursor:pointer;" onclick="window._toggleRow(${i})">
+      <td style="width:28px;text-align:center;padding:10px 6px;"><span id="bri-${i}" style="display:inline-block;transition:transform 0.18s;color:var(--text3);font-size:10px;">&#9654;</span></td>
+      <td style="padding:10px 12px;"><div style="display:flex;align-items:center;gap:9px;"><div style="width:28px;height:28px;border-radius:7px;flex-shrink:0;background:hsl(${hue},55%,22%);border:1px solid hsl(${hue},55%,32%);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:hsl(${hue},75%,72%);">${ini}</div><div><div style="font-size:12px;font-weight:600;">${a.accountName||w}</div><div style="font-size:10px;color:var(--text3);font-family:var(--mono);">${w}</div></div></div></td>
+      <td style="padding:10px 12px;">${_b(a.accountType,_tc)}</td>
+      <td style="padding:10px 12px;font-size:11px;white-space:nowrap;">${a.accountTypeBySize||'—'}</td>
+      <td style="padding:10px 12px;">${_b(a.businessType,_bc)}</td>
+      <td style="padding:10px 12px;font-size:11px;">${a.industry||'—'}<div style="font-size:10px;color:var(--text3);">${a.subIndustry||''}</div></td>
+      <td style="padding:10px 12px;font-size:11px;white-space:nowrap;">${a.employeeCount||'—'}</td>
+      <td style="padding:10px 12px;font-size:11px;color:var(--green);font-weight:500;white-space:nowrap;">${a.revenueUSD||'—'}</td>
+      <td style="padding:10px 12px;font-size:11px;white-space:nowrap;">${[a.billingCity,a.billingCountry].filter(Boolean).join(', ')||'—'}</td>
+      <td style="padding:10px 12px;font-size:11px;white-space:nowrap;">${a.region||'—'}</td>
+    </tr>
+    <tr id="brd-${i}" style="display:none;"><td colspan="10" style="padding:0;background:var(--surface2);border-bottom:2px solid var(--border2);">
+      <div style="padding:14px 16px;">
+        <div style="font-size:10px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px;">All 20 Fields — ${a.accountName||w}</div>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);border:1px solid var(--border);border-radius:8px;overflow:hidden;">${grid}</div>
       </div>
-
-      <!-- DRA Insights -->
-      ${a.draInsights?`<div style="padding:10px 16px;border-bottom:1px solid var(--border);font-size:12px;color:var(--text2);line-height:1.65;font-style:italic;">"${a.draInsights}"</div>`:''}
-
-      <!-- Row: Account Type · Size · Business Type · Employees · Revenue -->
-      <div style="display:grid;grid-template-columns:1.4fr 1.4fr 1fr 1fr 1fr;border-bottom:1px solid var(--border);">
-        ${cell('Account Type',a.accountType,{border:true})}
-        ${cell('Account Type By Size',a.accountTypeBySize,{border:true})}
-        ${cell('Business Type',a.businessType,{border:true})}
-        ${cell('Employee Count',a.employeeCount,{border:true})}
-        ${cell('Revenue (USD)',a.revenueUSD,{green:true})}
-      </div>
-
-      <!-- Row: Industry · Sub-Industry · Cloud Platform -->
-      <div style="display:grid;grid-template-columns:1fr 1fr 1.5fr;border-bottom:1px solid var(--border);">
-        ${cell('Industry',a.industry,{border:true})}
-        ${cell('Sub-Industry',a.subIndustry,{border:true})}
-        ${cell('Cloud Platform',a.cloudPlatform,{wrap:true})}
-      </div>
-
-      <!-- Row: Billing City · Billing State · Billing Country · Region · Time Zone -->
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr;border-bottom:1px solid var(--border);">
-        ${cell('Billing City',a.billingCity,{border:true})}
-        ${cell('Billing State',a.billingState,{border:true})}
-        ${cell('Billing Country',a.billingCountry,{border:true})}
-        ${cell('Region',a.region,{border:true})}
-        ${cell('Time Zone',a.timeZone)}
-      </div>
-
-      <!-- Row: Account Type Reason (full width) -->
-      <div style="border-bottom:1px solid var(--border);">
-        ${cell('Account Type Reason',a.accountTypeReason,{wrap:true})}
-      </div>
-
-      <!-- Row: Engineering & IT · DevOps -->
-      <div style="display:grid;grid-template-columns:1fr 1fr;">
-        ${cell('Engineering & IT',a.engineeringIT,{border:true,wrap:true})}
-        ${cell('DevOps',a.devOps,{wrap:true})}
-      </div>
-
-    </div>`;
+    </td></tr>`;
   }).join('');
 
-  // Build error cards
-  const errorCards=errorList.length?`
-    <div style="border:1px solid var(--red-border);border-radius:var(--rl);overflow:hidden;margin-bottom:14px;">
-      <div style="padding:11px 16px;background:var(--red-bg);border-bottom:1px solid var(--red-border);display:flex;align-items:center;gap:8px;">
-        <span style="font-size:13px;font-weight:600;color:var(--red);">❌ Failed Enrichments</span>
-        <span class="badge b-red">${errorList.length} failed</span>
-      </div>
-      ${errorList.map(w=>`
-        <div style="display:flex;align-items:center;justify-content:space-between;padding:11px 16px;border-bottom:1px solid var(--red-border);">
-          <div>
-            <div style="font-size:12px;font-weight:600;color:var(--text);font-family:var(--mono);margin-bottom:3px;">${w}</div>
-            <div style="font-size:11px;color:var(--red);">Enrichment failed — API error or rate limit. Click Retry to try again.</div>
-          </div>
-          <button class="btn btn-s btn-sm" onclick="window.retryEnrich('${w}',this)" style="flex-shrink:0;margin-left:14px;">↺ Retry</button>
-        </div>`).join('')}
-    </div>`:'';
+  const errorRows=errorList.map(w=>`<tr><td colspan="10" style="padding:10px 14px;background:var(--red-bg);border-bottom:1px solid var(--red-border);"><div style="display:flex;align-items:center;justify-content:space-between;"><div><span style="font-family:var(--mono);font-size:12px;font-weight:600;color:var(--text);">${w}</span><span style="font-size:11px;color:var(--red);margin-left:10px;">Enrichment failed — click Retry</span></div><button class="btn btn-sm" style="background:var(--red-bg);color:var(--red);border:1px solid var(--red-border);flex-shrink:0;" onclick="window.retryEnrich('${w}',this)">&#8634; Retry</button></div></td></tr>`).join('');
 
-  document.getElementById('bulkResults').innerHTML=`
-    <div style="margin-top:18px;">
-      <!-- Header bar -->
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
-        <div style="display:flex;align-items:center;gap:8px;">
-          <span style="font-size:14px;font-weight:600;">Results</span>
-          <span class="badge b-green">${successes} enriched</span>
-          ${errorList.length?`<span class="badge b-red">${errorList.length} failed</span>`:''}
-        </div>
-        ${successList.length?`<button class="btn btn-s btn-sm" onclick="window._exportBulkCSV()" style="display:flex;align-items:center;gap:5px;">↓ Export All (CSV)</button>`:''}
+  document.getElementById('bulkResults').innerHTML=`<div style="margin-top:18px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+      <div style="display:flex;align-items:center;gap:8px;">
+        <span style="font-size:14px;font-weight:600;">Results</span>
+        ${successes?`<span class="badge b-green">${successes} enriched</span>`:''}
+        ${errorList.length?`<span class="badge b-red">${errorList.length} failed</span>`:''}
+        <span style="font-size:11px;color:var(--text3);">&#9654; Click any row to see all 20 fields</span>
       </div>
-      ${errorCards}
-      ${successCards}
-    </div>`;
-
-  // Retry individual failed enrichment
-  window.retryEnrich=async function(w, btn){
-    btn.disabled=true;btn.textContent='…';
-    try{
-      const acc=await callAI(w.trim());acc.id=Date.now()+Math.random();acc.website=w.trim();
-      await saveAccount(acc);
-      await logEvent('enrich',`Retried enrichment: ${acc.accountName||w}`,{website:w});
-      toast(`✅ ${acc.accountName||w} enriched successfully`,'success');
-      // Remove the error row for this domain
-      btn.closest('div[style*="border-bottom"]').remove();
-    }catch(e){btn.disabled=false;btn.textContent='↺ Retry';toast(`Failed again: ${w}`,'error');}
-  };
+      ${successList.length?`<button class="btn btn-s btn-sm" onclick="window._exportBulkCSV()">&#8595; Export CSV (20 fields)</button>`:''}
+    </div>
+    <div class="tw"><div class="ts"><table>
+      <thead><tr><th style="width:28px;"></th><th>Account</th><th>Type</th><th>Size</th><th>B.Type</th><th>Industry</th><th>Employees</th><th>Revenue</th><th>Location</th><th>Region</th></tr></thead>
+      <tbody>${summaryRows}${errorRows}</tbody>
+    </table></div></div>
+  </div>`;
 }
+
 
 
 // ─────────────────────────────────────────────────
