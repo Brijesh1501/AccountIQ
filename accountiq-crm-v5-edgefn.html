@@ -557,7 +557,6 @@ input[type=checkbox]{accent-color:var(--accent);width:13px;height:13px;cursor:po
           </div>
         </div>
         <div id="bulkProg"></div>
-        <div id="bulkResults"></div>
       </div>
 
       <!-- CSV -->
@@ -1286,15 +1285,13 @@ function cardHtml(acc){
 async function startBulk(){
   const lines=document.getElementById('bulkWS').value.trim().split('\n').filter(l=>l.trim());if(!lines.length)return;
   const btn=document.getElementById('bulkBtn');btn.disabled=true;
-  document.getElementById('bulkResults').innerHTML='';
   let done=0;const total=lines.length,st={};lines.forEach(l=>st[l]='queued');
-  const results={}; // store enriched data per website
   document.getElementById('bulkProg').innerHTML=`<div class="card"><div style="display:flex;justify-content:space-between;margin-bottom:5px;"><span style="font-size:13px;font-weight:600;">Processing ${total}</span><span id="bpt" style="font-size:11px;color:var(--text3)">0 / ${total}</span></div><div class="pbw"><div class="pb" id="bpb" style="width:0%"></div></div><div id="bpj" style="margin-top:12px;"></div></div>`;
   const rj=()=>{document.getElementById('bpj').innerHTML=lines.map(l=>`<div class="jr"><span class="js">${l}</span><span class="badge ${st[l]==='done'?'b-green':st[l]==='error'?'b-red':st[l]==='running'?'b-blue':'b-gray'}">${st[l]}</span></div>`).join('');};rj();
   for(const w of lines){
     st[w]='running';rj();
-    try{const acc=await callAI(w.trim());acc.id=Date.now()+Math.random();acc.website=w.trim();await saveAccount(acc);await logEvent('enrich',`Bulk enriched: ${acc.accountName||w}`,{website:w});st[w]='done';results[w]=acc;}
-    catch(e){st[w]='error';results[w]=null;}
+    try{const acc=await callAI(w.trim());acc.id=Date.now()+Math.random();acc.website=w.trim();await saveAccount(acc);await logEvent('enrich',`Bulk enriched: ${acc.accountName||w}`,{website:w});st[w]='done';}
+    catch(e){st[w]='error';}
     done++;const pt=document.getElementById('bpt');if(pt)pt.textContent=done+' / '+total;
     const pb=document.getElementById('bpb');if(pb)pb.style.width=Math.round(done/total*100)+'%';
     rj();await new Promise(r=>setTimeout(r,500));
@@ -1303,87 +1300,6 @@ async function startBulk(){
   const successes=lines.filter(l=>st[l]==='done').length;
   await logEvent('enrich',`Bulk enrichment: ${successes}/${total} succeeded`);
   toast(`Bulk complete: ${successes} succeeded`,'success');
-
-  // ── Render results table ────────────────────────────────
-  const successList=lines.filter(l=>st[l]==='done');
-  const errorList=lines.filter(l=>st[l]==='error');
-  if(!successList.length){document.getElementById('bulkResults').innerHTML='';return;}
-
-  const csvRows=successList.map(w=>{
-    const a=results[w];
-    return [
-      a.accountName||'', w,
-      a.accountType||'', a.accountTypeBySize||'', a.accountTypeReason||'',
-      a.businessType||'', a.industry||'', a.subIndustry||'',
-      a.employeeCount||'', a.revenueUSD||'',
-      a.draInsights||'', a.engineeringIT||'', a.devOps||'', a.cloudPlatform||'',
-      a.billingCity||'', a.billingState||'', a.billingCountry||'',
-      a.region||'', a.timeZone||'', a.accountLinkedIn||''
-    ];
-  });
-  const csvHeaders=['Account Name','Website','Account Type','Account Type By Size','Account Type Reason','Business Type','Industry','Sub-Industry','Employee Count','Revenue (USD)','DRA Insights','Engineering & IT','DevOps','Cloud Platform','Billing City','Billing State','Billing Country','Region','Time Zone','LinkedIn'];
-
-  function exportBulkCSV(){
-    const rows=[csvHeaders,...csvRows].map(r=>r.map(c=>'"'+(String(c||'').replace(/"/g,'""'))+'"').join(',')).join('\n');
-    const a=document.createElement('a');a.href='data:text/csv;charset=utf-8,'+encodeURIComponent(rows);a.download='bulk-enrichment-'+Date.now()+'.csv';a.click();
-  }
-  window._exportBulkCSV=exportBulkCSV;
-
-  const tableRows=successList.map(w=>{
-    const a=results[w];
-    const typeColor=a.accountType==='ISV'?'b-purple':a.accountType==='Enterprise'?'b-blue':a.accountType==='Consumer Portal'?'b-teal':a.accountType==='Agency/Service Company'?'b-amber':'b-gray';
-    return `<tr>
-      <td style="font-weight:500">${a.accountName||w}</td>
-      <td style="font-family:var(--mono);font-size:11px;color:var(--text2)">${w}</td>
-      <td><span class="badge ${typeColor}">${a.accountType||'-'}</span></td>
-      <td style="font-size:11px">${a.accountTypeBySize||'-'}</td>
-      <td style="font-size:11px;color:var(--text2);max-width:200px;white-space:normal;line-height:1.4">${a.accountTypeReason||'-'}</td>
-      <td style="font-size:11px">${a.businessType||'-'}</td>
-      <td style="font-size:11px">${a.industry||'-'}</td>
-      <td style="font-size:11px;color:var(--text2)">${a.subIndustry||'-'}</td>
-      <td style="font-size:11px">${a.employeeCount||'-'}</td>
-      <td style="font-size:11px">${a.revenueUSD||'-'}</td>
-      <td style="font-size:11px;color:var(--text2);max-width:220px;white-space:normal;line-height:1.4">${a.draInsights||'-'}</td>
-      <td style="font-size:11px;color:var(--text2);max-width:200px;white-space:normal;line-height:1.4">${a.engineeringIT||'-'}</td>
-      <td style="font-size:11px;color:var(--text2);max-width:200px;white-space:normal;line-height:1.4">${a.devOps||'-'}</td>
-      <td style="font-size:11px;color:var(--text2);max-width:180px;white-space:normal;line-height:1.4">${a.cloudPlatform||'-'}</td>
-      <td style="font-size:11px">${a.billingCity||'-'}</td>
-      <td style="font-size:11px">${a.billingState||'-'}</td>
-      <td style="font-size:11px">${a.billingCountry||'-'}</td>
-      <td style="font-size:11px">${a.region||'-'}</td>
-      <td style="font-size:11px">${a.timeZone||'-'}</td>
-      <td style="font-size:11px">${a.accountLinkedIn?`<a href="${a.accountLinkedIn}" target="_blank" style="color:var(--accent);text-decoration:none;">View ↗</a>`:'-'}</td>
-    </tr>`;
-  }).join('');
-
-  const errorSection=errorList.length?`<div style="margin-top:10px;padding:10px 12px;background:var(--red-bg);border:1px solid var(--red-border);border-radius:8px;font-size:11px;color:var(--red);">
-    ❌ Failed (${errorList.length}): ${errorList.join(', ')}
-  </div>`:'';
-
-  document.getElementById('bulkResults').innerHTML=`
-    <div class="tw" style="margin-top:18px;">
-      <div class="th">
-        <div class="thl">
-          <span style="font-size:13px;font-weight:600;">✅ Enrichment Results</span>
-          <span class="badge b-green">${successes} enriched</span>
-          ${errorList.length?`<span class="badge b-red">${errorList.length} failed</span>`:''}
-        </div>
-        <button class="btn btn-s btn-sm" onclick="window._exportBulkCSV()">↓ Export CSV</button>
-      </div>
-      <div class="ts">
-        <table>
-          <thead><tr>
-            <th>Account Name</th><th>Website</th><th>Account Type</th><th>Size</th><th>Type Reason</th>
-            <th>Business Type</th><th>Industry</th><th>Sub-Industry</th>
-            <th>Employees</th><th>Revenue</th>
-            <th>DRA Insights</th><th>Engineering & IT</th><th>DevOps</th><th>Cloud Platform</th>
-            <th>City</th><th>State</th><th>Country</th><th>Region</th><th>Timezone</th><th>LinkedIn</th>
-          </tr></thead>
-          <tbody>${tableRows}</tbody>
-        </table>
-      </div>
-      ${errorSection}
-    </div>`;
 }
 
 // ─────────────────────────────────────────────────
