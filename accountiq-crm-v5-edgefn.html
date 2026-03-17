@@ -1344,74 +1344,69 @@ async function startBulk(){
     const a=results[w];
     const initials=(a.accountName||w).substring(0,2).toUpperCase();
     const hue=[210,265,175,35,0,310][i%6];
+    function cell(label,value,opts={}){
+      const val=value&&value!=='-'?value:'—';
+      const valStyle=opts.green?'color:var(--green);font-weight:500;':opts.mono?'font-family:var(--mono);font-size:10px;color:var(--text2);':'color:var(--text);';
+      const wrap=opts.wrap?'white-space:normal;line-height:1.5;':'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
+      return `<div style="padding:10px 14px;${opts.border?'border-right:1px solid var(--border);':''}${opts.btop?'border-top:1px solid var(--border);':''}">
+        <div style="font-size:9px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:4px;">${label}</div>
+        <div style="font-size:11px;${valStyle}${wrap}">${val}</div>
+      </div>`;
+    }
     return `
-    <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--rl);overflow:hidden;margin-bottom:12px;">
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--rl);overflow:hidden;margin-bottom:14px;">
 
-      <!-- Row 1: Account header -->
-      <div style="display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--border);background:var(--surface2);">
-        <div style="width:34px;height:34px;border-radius:8px;background:hsl(${hue},60%,25%);border:1px solid hsl(${hue},60%,35%);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:hsl(${hue},80%,75%);flex-shrink:0;">${initials}</div>
+      <!-- Header -->
+      <div style="display:flex;align-items:center;gap:12px;padding:12px 16px;background:var(--surface2);border-bottom:1px solid var(--border);">
+        <div style="width:36px;height:36px;border-radius:9px;background:hsl(${hue},55%,22%);border:1px solid hsl(${hue},55%,32%);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:hsl(${hue},75%,72%);flex-shrink:0;">${initials}</div>
         <div style="flex:1;min-width:0;">
-          <div style="font-size:13px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${a.accountName||w}</div>
+          <div style="font-size:13px;font-weight:600;">${a.accountName||w}</div>
           <div style="font-size:11px;color:var(--text3);font-family:var(--mono);">${w}</div>
         </div>
         <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
           ${typeBadge(a.accountType)}
           ${bizBadge(a.businessType)}
-          ${a.accountLinkedIn?`<a href="${a.accountLinkedIn}" target="_blank" style="display:inline-flex;align-items:center;gap:4px;padding:3px 9px;border-radius:6px;background:rgba(79,142,247,0.1);border:1px solid rgba(79,142,247,0.2);color:var(--accent);font-size:10px;font-weight:600;text-decoration:none;">in ↗</a>`:''}
+          ${a.accountLinkedIn?`<a href="${a.accountLinkedIn}" target="_blank" style="display:inline-flex;align-items:center;gap:3px;padding:3px 9px;border-radius:6px;background:rgba(79,142,247,0.1);border:1px solid rgba(79,142,247,0.2);color:var(--accent);font-size:10px;font-weight:600;text-decoration:none;">in ↗</a>`:''}
         </div>
       </div>
 
-      <!-- Row 2: DRA Insights -->
-      ${a.draInsights?`<div style="padding:10px 16px;border-bottom:1px solid var(--border);font-size:12px;color:var(--text2);line-height:1.65;">${a.draInsights}</div>`:''}
+      <!-- DRA Insights -->
+      ${a.draInsights?`<div style="padding:10px 16px;border-bottom:1px solid var(--border);font-size:12px;color:var(--text2);line-height:1.65;font-style:italic;">"${a.draInsights}"</div>`:''}
 
-      <!-- Row 3: Core classification grid -->
-      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:0;border-bottom:1px solid var(--border);">
-        <div style="padding:10px 14px;border-right:1px solid var(--border);">
-          <div style="font-size:9px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:0.07em;margin-bottom:4px;">Size</div>
-          <div style="font-size:12px;color:var(--text);font-weight:500;">${a.accountTypeBySize||'—'}</div>
-        </div>
-        <div style="padding:10px 14px;border-right:1px solid var(--border);">
-          <div style="font-size:9px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:0.07em;margin-bottom:4px;">Employees</div>
-          <div style="font-size:12px;color:var(--text);font-weight:500;">${a.employeeCount||'—'}</div>
-        </div>
-        <div style="padding:10px 14px;border-right:1px solid var(--border);">
-          <div style="font-size:9px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:0.07em;margin-bottom:4px;">Revenue</div>
-          <div style="font-size:12px;color:var(--green);font-weight:500;">${a.revenueUSD||'—'}</div>
-        </div>
-        <div style="padding:10px 14px;">
-          <div style="font-size:9px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:0.07em;margin-bottom:4px;">Cloud</div>
-          <div style="font-size:11px;color:var(--text2);line-height:1.4;">${a.cloudPlatform||'—'}</div>
-        </div>
+      <!-- Row: Account Type · Size · Business Type · Employees · Revenue -->
+      <div style="display:grid;grid-template-columns:1.4fr 1.4fr 1fr 1fr 1fr;border-bottom:1px solid var(--border);">
+        ${cell('Account Type',a.accountType,{border:true})}
+        ${cell('Account Type By Size',a.accountTypeBySize,{border:true})}
+        ${cell('Business Type',a.businessType,{border:true})}
+        ${cell('Employee Count',a.employeeCount,{border:true})}
+        ${cell('Revenue (USD)',a.revenueUSD,{green:true})}
       </div>
 
-      <!-- Row 4: Industry + Location -->
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0;border-bottom:1px solid var(--border);">
-        <div style="padding:10px 14px;border-right:1px solid var(--border);">
-          <div style="font-size:9px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:0.07em;margin-bottom:4px;">Industry</div>
-          <div style="font-size:11px;color:var(--text);">${a.industry||'—'}</div>
-          <div style="font-size:10px;color:var(--text3);margin-top:2px;">${a.subIndustry||''}</div>
-        </div>
-        <div style="padding:10px 14px;border-right:1px solid var(--border);">
-          <div style="font-size:9px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:0.07em;margin-bottom:4px;">Location</div>
-          <div style="font-size:11px;color:var(--text);">${[a.billingCity,a.billingState,a.billingCountry].filter(Boolean).join(', ')||'—'}</div>
-          <div style="font-size:10px;color:var(--text3);margin-top:2px;">${a.region||''} ${a.timeZone?'· '+a.timeZone:''}</div>
-        </div>
-        <div style="padding:10px 14px;">
-          <div style="font-size:9px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:0.07em;margin-bottom:4px;">Account Type Reason</div>
-          <div style="font-size:11px;color:var(--text2);line-height:1.5;">${a.accountTypeReason||'—'}</div>
-        </div>
+      <!-- Row: Industry · Sub-Industry · Cloud Platform -->
+      <div style="display:grid;grid-template-columns:1fr 1fr 1.5fr;border-bottom:1px solid var(--border);">
+        ${cell('Industry',a.industry,{border:true})}
+        ${cell('Sub-Industry',a.subIndustry,{border:true})}
+        ${cell('Cloud Platform',a.cloudPlatform,{wrap:true})}
       </div>
 
-      <!-- Row 5: Engineering + DevOps -->
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:0;">
-        <div style="padding:10px 14px;border-right:1px solid var(--border);">
-          <div style="font-size:9px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:0.07em;margin-bottom:4px;">Engineering & IT</div>
-          <div style="font-size:11px;color:var(--text2);line-height:1.5;">${a.engineeringIT||'—'}</div>
-        </div>
-        <div style="padding:10px 14px;">
-          <div style="font-size:9px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:0.07em;margin-bottom:4px;">DevOps</div>
-          <div style="font-size:11px;color:var(--text2);line-height:1.5;">${a.devOps||'—'}</div>
-        </div>
+      <!-- Row: Billing City · Billing State · Billing Country · Region · Time Zone -->
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr;border-bottom:1px solid var(--border);">
+        ${cell('Billing City',a.billingCity,{border:true})}
+        ${cell('Billing State',a.billingState,{border:true})}
+        ${cell('Billing Country',a.billingCountry,{border:true})}
+        ${cell('Region',a.region,{border:true})}
+        ${cell('Time Zone',a.timeZone)}
+      </div>
+
+      <!-- Row: Account Type Reason (full width) -->
+      <div style="border-bottom:1px solid var(--border);">
+        ${cell('Account Type Reason',a.accountTypeReason,{wrap:true})}
+      </div>
+
+      <!-- Row: Engineering & IT · DevOps -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;">
+        ${cell('Engineering & IT',a.engineeringIT,{border:true,wrap:true})}
+        ${cell('DevOps',a.devOps,{wrap:true})}
       </div>
 
     </div>`;
@@ -1419,20 +1414,20 @@ async function startBulk(){
 
   // Build error cards
   const errorCards=errorList.length?`
-    <div style="border:1px solid var(--red-border);border-radius:var(--rl);overflow:hidden;margin-bottom:12px;">
-      <div style="padding:10px 16px;background:var(--red-bg);border-bottom:1px solid var(--red-border);display:flex;align-items:center;gap:8px;">
+    <div style="border:1px solid var(--red-border);border-radius:var(--rl);overflow:hidden;margin-bottom:14px;">
+      <div style="padding:11px 16px;background:var(--red-bg);border-bottom:1px solid var(--red-border);display:flex;align-items:center;gap:8px;">
         <span style="font-size:13px;font-weight:600;color:var(--red);">❌ Failed Enrichments</span>
         <span class="badge b-red">${errorList.length} failed</span>
       </div>
       ${errorList.map(w=>`
-        <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 16px;border-bottom:1px solid var(--red-border);last-child:border-none;">
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:11px 16px;border-bottom:1px solid var(--red-border);">
           <div>
-            <div style="font-size:12px;font-weight:500;color:var(--text);font-family:var(--mono);">${w}</div>
-            <div style="font-size:11px;color:var(--red);margin-top:2px;">Enrichment failed — API error or rate limit. Try re-enriching individually.</div>
+            <div style="font-size:12px;font-weight:600;color:var(--text);font-family:var(--mono);margin-bottom:3px;">${w}</div>
+            <div style="font-size:11px;color:var(--red);">Enrichment failed — API error or rate limit. Click Retry to try again.</div>
           </div>
-          <button class="btn btn-s btn-sm" onclick="retryEnrich('${w}')" style="flex-shrink:0;margin-left:12px;">↺ Retry</button>
+          <button class="btn btn-s btn-sm" onclick="window.retryEnrich('${w}',this)" style="flex-shrink:0;margin-left:14px;">↺ Retry</button>
         </div>`).join('')}
-    </div>`:'' ;
+    </div>`:'';
 
   document.getElementById('bulkResults').innerHTML=`
     <div style="margin-top:18px;">
@@ -1450,14 +1445,14 @@ async function startBulk(){
     </div>`;
 
   // Retry individual failed enrichment
-  window.retryEnrich=async function(w){
-    const btn=event.target;btn.disabled=true;btn.textContent='…';
+  window.retryEnrich=async function(w, btn){
+    btn.disabled=true;btn.textContent='…';
     try{
       const acc=await callAI(w.trim());acc.id=Date.now()+Math.random();acc.website=w.trim();
       await saveAccount(acc);
       await logEvent('enrich',`Retried enrichment: ${acc.accountName||w}`,{website:w});
       toast(`✅ ${acc.accountName||w} enriched successfully`,'success');
-      // Remove error row
+      // Remove the error row for this domain
       btn.closest('div[style*="border-bottom"]').remove();
     }catch(e){btn.disabled=false;btn.textContent='↺ Retry';toast(`Failed again: ${w}`,'error');}
   };
