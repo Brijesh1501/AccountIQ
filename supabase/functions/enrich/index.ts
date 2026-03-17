@@ -286,7 +286,12 @@ async function searchCloudPlatform(companyName: string, searchAnchor: string, se
         const bwData = await bwRes.json();
         for (const item of bwData?.organic || []) {
           const link: string = item.link || "";
-          if (link.includes("builtwith.com") && link.includes(domainSlug)) {
+          if (
+            link.includes("builtwith.com") &&
+            link.includes(domainSlug) &&
+            !link.includes("/compare/") &&
+            !link.includes("/vs/")
+          ) {
             const platform = detectPlatform(item.title + " " + item.snippet);
             if (platform) return { platform, sourceUrl: link, snippet: item.snippet || "" };
             // BuiltWith page found but no cloud in snippet — still return URL as best source
@@ -301,13 +306,20 @@ async function searchCloudPlatform(companyName: string, searchAnchor: string, se
       const wapRes = await fetch("https://google.serper.dev/search", {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-API-KEY": serperKey },
-        body: JSON.stringify({ q: `site:wappalyzer.com "${cleanDomain}"`, num: 3 }),
+        body: JSON.stringify({ q: `site:wappalyzer.com/websites "${cleanDomain}"`, num: 3 }),
       });
       if (wapRes.ok) {
         const wapData = await wapRes.json();
         for (const item of wapData?.organic || []) {
           const link: string = item.link || "";
-          if (link.includes("wappalyzer.com") && link.includes(domainSlug)) {
+          // Only accept direct website profile pages — reject /compare/, /technologies/, /vs/ pages
+          if (
+            link.includes("wappalyzer.com") &&
+            link.includes(domainSlug) &&
+            !link.includes("/compare/") &&
+            !link.includes("/vs/") &&
+            !link.includes("/technologies/")
+          ) {
             const platform = detectPlatform(item.title + " " + item.snippet);
             if (platform) return { platform, sourceUrl: link, snippet: item.snippet || "" };
             return { platform: "", sourceUrl: link, snippet: item.snippet || "" };
@@ -427,15 +439,26 @@ ISV PRODUCT TYPES — any of these qualifies:
   • Small employee count (even 5–50) does NOT disqualify ISV status
   • "Research" or "data" companies with a platform → ISV, NOT Agency
 
-REAL EXAMPLES OF ISV (not Agency despite offering services):
-  • briter.co — owns "Briter Intelligence" platform + "AgBase" product, subscription-based data platform → ISV
-  • Freshworks — owns CRM/helpdesk products → ISV
-  • Zoho — owns productivity suite → ISV
-  • Postman — owns API platform → ISV
-  • Tracxn — owns startup intelligence platform → ISV
-  • Crunchbase — owns company data platform → ISV
+⚠️ ISV INDEPENDENCE — CRITICAL RULE:
+  The company MUST be independent. If it has been ACQUIRED by or is a SUBSIDIARY of another company → it CANNOT be ISV → classify as Enterprise instead.
 
-→ If YES → accountType = "ISV". STOP.
+  ACQUIRED = NOT ISV examples:
+  • WhatsApp → acquired by Meta (Facebook) in 2014 for $19B → Enterprise (NOT ISV)
+  • Instagram → acquired by Meta → Enterprise
+  • YouTube → acquired by Google → Enterprise
+  • LinkedIn → acquired by Microsoft → Enterprise
+  • GitHub → acquired by Microsoft → Enterprise
+  • Slack → acquired by Salesforce → Enterprise
+  • Waze → acquired by Google → Enterprise
+
+  INDEPENDENT = ISV examples:
+  • briter.co — owns "Briter Intelligence" platform + "AgBase" product → ISV
+  • Freshworks — independent, owns CRM/helpdesk products → ISV
+  • Zoho — independent, owns productivity suite → ISV
+  • Postman — independent, owns API platform → ISV
+
+→ If owns product AND is independent → accountType = "ISV". STOP.
+→ If owns product BUT was acquired/is subsidiary → skip ISV, go to Step 5 (Enterprise). STOP.
 
 ──────────────────────────────────────────────────────
 STEP 3 — Is it an Agency/Service Company?
@@ -525,6 +548,16 @@ Healthcare & Life Sciences → Pharmaceuticals | Healthcare Providers | Health, 
 Travel & Hospitality → Air Travel | Aerospace | Hotels | OTA (Online Travel Agencies)
 
 Business Software / Internet (SaaS) → AdTech & MarTech | ERP & Procurement Platforms | AI Platforms & Chatbots | HRMS & Workforce Management | Data Management & Analytics | Cybersecurity Platforms | Inventory Management | Facility Management | CMS | RegTech | Legal Services Platforms | Other B2B SaaS
+
+⚠️ SUB-INDUSTRY SELECTION GUIDE — pick the most specific match:
+  • Messaging/communication apps (WhatsApp, Slack, Teams) → Other B2B SaaS
+  • Analytics tools, BI platforms, data pipelines (Tableau, Mixpanel, Segment) → Data Management & Analytics
+  • AI assistants, chatbots, LLM platforms (OpenAI, Cohere, Blackbox.ai) → AI Platforms & Chatbots
+  • HR software, payroll, workforce tools (Darwinbox, Keka) → HRMS & Workforce Management
+  • Ad platforms, marketing automation (HubSpot, Marketo) → AdTech & MarTech
+  • ERP, procurement, supply chain (SAP, Coupa) → ERP & Procurement Platforms
+  • Security tools, identity, compliance (Okta, CrowdStrike) → Cybersecurity Platforms
+  • If none of the above fit precisely → Other B2B SaaS
 
 Sports → Leagues | Clubs & Teams | Sports Federations
 
@@ -754,31 +787,43 @@ serve(async (req: Request) => {
     let linkedInData: LinkedInData = { employeeCount: "", employeeRange: "", hqLocation: "", founded: "", industry: "", companyType: "", website: "", about: "", engineeringTeamSize: "", devOpsTeamSize: "" };
     let webSearchContext = "";
     let cloudEvidence: CloudEvidence = { platform: "", sourceUrl: "", snippet: "" };
+    let serperExhausted = false;
 
     if (serperKey) {
       console.log("Running web search for:", website);
       try {
-        const [liUrl, webCtx, cloudEv] = await Promise.all([
-          findLinkedInUrl(companyName, searchAnchor, serperKey),
-          searchCompanyInfo(companyName, searchAnchor, serperKey),
-          searchCloudPlatform(companyName, searchAnchor, serperKey),
-        ]);
-        linkedInUrl = liUrl;
-        webSearchContext = webCtx;
-        cloudEvidence = cloudEv;
-        console.log("LinkedIn URL found:", linkedInUrl || "none");
-        console.log("Web context length:", webSearchContext.length);
-        console.log("Cloud evidence:", JSON.stringify(cloudEvidence));
+        // Quick quota check — fire one probe search before spending all calls
+        const probeRes = await fetch("https://google.serper.dev/search", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-API-KEY": serperKey },
+          body: JSON.stringify({ q: `"${searchAnchor}"`, num: 1 }),
+        });
 
-        if (linkedInUrl) {
-          linkedInData = await scrapeLinkedIn(linkedInUrl);
-          console.log("LinkedIn data:", JSON.stringify(linkedInData));
+        if (probeRes.status === 429) {
+          // Quota exhausted — skip all Serper calls, go straight to Groq-only
+          serperExhausted = true;
+          console.log("Serper quota exhausted (429) — falling back to Groq knowledge only");
+        } else if (probeRes.ok) {
+          // Quota available — run all searches in parallel
+          const [liUrl, webCtx, cloudEv] = await Promise.all([
+            findLinkedInUrl(companyName, searchAnchor, serperKey),
+            searchCompanyInfo(companyName, searchAnchor, serperKey),
+            searchCloudPlatform(companyName, searchAnchor, serperKey),
+          ]);
+          linkedInUrl = liUrl;
+          webSearchContext = webCtx;
+          cloudEvidence = cloudEv;
+          console.log("LinkedIn URL found:", linkedInUrl || "none");
+          console.log("Web context length:", webSearchContext.length);
+          console.log("Cloud evidence:", JSON.stringify(cloudEvidence));
+
+          if (linkedInUrl) {
+            linkedInData = await scrapeLinkedIn(linkedInUrl);
+            console.log("LinkedIn data:", JSON.stringify(linkedInData));
+          }
         }
       } catch (searchErr) {
-        console.log("Web search failed (possibly quota exhausted) — using Groq knowledge only:", searchErr);
-        linkedInUrl = "";
-        webSearchContext = "";
-        cloudEvidence = { platform: "", sourceUrl: "", snippet: "" };
+        console.log("Web search failed — using Groq knowledge only:", searchErr);
       }
     } else {
       console.log("No Serper key configured — using Groq knowledge only");
@@ -826,15 +871,21 @@ ${cloudEvidence.platform && cloudEvidence.sourceUrl
   : cloudEvidence.sourceUrl && !cloudEvidence.platform
   ? `- 🔍 Tech profile page found but cloud platform not detected in snippet: ${cloudEvidence.sourceUrl}. Infer the most likely platform from company type and use this URL as the source.`
   : `- ❌ No cloud source found via BuiltWith/Wappalyzer/StackShare/careers search. Infer the platform from company type/industry. Write: "[Platform] | Source: No verified source found (inferred from [specific reason])"`
-}` : `No web search data available — use your full training knowledge.
-Apply the complete knowledge base rules in your system prompt.
-⚠️ Research must be specific to "${cleanDomain}" — not similarly named companies on other TLDs.
-Make confident inferences based on domain TLD, company name, industry context.
-Never return "Unknown" when inference is possible.`}
+}` : `=== GROQ KNOWLEDGE-ONLY MODE (${serperExhausted ? "Serper quota exhausted" : "no web search available"}) ===
+You must rely entirely on your training knowledge to research "${cleanDomain}".
+
+Instructions:
+- Use everything you know about this specific company from your training data
+- ⚠️ Research must be specific to "${cleanDomain}" — NOT similarly named companies on other TLDs
+- Apply all classification rules from your system prompt strictly
+- For fields you cannot determine with confidence, make the best possible inference based on domain TLD, company name, industry signals, and your training knowledge
+- For cloudPlatform: write "[Platform] | Source: No verified source found (inferred from [reason])"
+- For accountLinkedIn: construct as https://www.linkedin.com/company/[most-likely-slug]
+- NEVER return "Unknown" — always provide your best inference with a note if uncertain`}
 
 CLASSIFICATION REMINDERS — read carefully before classifying:
 1. Order: PE/VC → ISV → Agency → Consumer Portal → Enterprise (default)
-2. ⚠️ ISV BEFORE Agency: If company has ANY named proprietary platform/product with subscriptions → ISV, NOT Agency. Small size (even 10–50 employees) does NOT prevent ISV classification.
+2. ⚠️ ISV BEFORE Agency BUT only if INDEPENDENT: If company has a product BUT was acquired → Enterprise NOT ISV. WhatsApp (acquired by Meta), Instagram, YouTube, GitHub, Slack → all Enterprise. ISV must own product AND be independent.
 3. Data/intelligence/research platforms with their own product (like Briter Intelligence, Tracxn, Crunchbase) → ISV + Business Software/Internet (SaaS) + Data Management & Analytics
 4. Non-IT service companies → Enterprise NOT Agency (e.g. logistics, real estate, accounting, law firms)
 5. Company selling only its OWN products online → Enterprise NOT Consumer Portal
